@@ -1,80 +1,61 @@
-import { useRef, useState, useCallback, useEffect } from "react";
-import type { Scene } from "@/lib/scene-types";
-import { renderFrame } from "@/lib/renderer";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import type { RemotionScene } from "@/lib/scene-types";
+import { createRemotionComponent } from "@/lib/remotion-renderer";
+import type { PlayerRef } from "@remotion/player";
 
-export function usePlayer(scene: Scene | null) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+export function usePlayer(scene: RemotionScene) {
+  const playerRef = useRef<PlayerRef>(null);
   const [playing, setPlaying] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(0);
-  const frameRef = useRef(0);
-  const rafRef = useRef<number>(0);
-  const lastTimeRef = useRef(0);
 
-  const draw = useCallback((frame: number) => {
-    if (!scene || !canvasRef.current) return;
-    const ctx = canvasRef.current.getContext("2d");
-    if (!ctx) return;
-    renderFrame(scene, frame, ctx);
-  }, [scene]);
-
-  // Draw current frame when scene changes
-  useEffect(() => {
-    draw(frameRef.current);
-  }, [draw]);
-
-  const tick = useCallback((timestamp: number) => {
-    if (!scene) return;
-    const interval = 1000 / scene.fps;
-    if (timestamp - lastTimeRef.current >= interval) {
-      lastTimeRef.current = timestamp;
-      frameRef.current = (frameRef.current + 1) % scene.duration;
-      setCurrentFrame(frameRef.current);
-      draw(frameRef.current);
-    }
-    rafRef.current = requestAnimationFrame(tick);
-  }, [scene, draw]);
-
-  const play = useCallback(() => {
-    if (!scene) return;
-    setPlaying(true);
-    lastTimeRef.current = performance.now();
-    rafRef.current = requestAnimationFrame(tick);
-  }, [scene, tick]);
-
-  const pause = useCallback(() => {
-    setPlaying(false);
-    cancelAnimationFrame(rafRef.current);
-  }, []);
+  const DynamicComponent = useMemo(
+    () => createRemotionComponent(scene.componentCode),
+    [scene.componentCode]
+  );
 
   const togglePlay = useCallback(() => {
-    if (playing) pause(); else play();
-  }, [playing, play, pause]);
+    const p = playerRef.current;
+    if (!p) return;
+    if (playing) {
+      p.pause();
+    } else {
+      p.play();
+    }
+  }, [playing]);
 
   const reset = useCallback(() => {
-    frameRef.current = 0;
+    const p = playerRef.current;
+    if (!p) return;
+    p.pause();
+    p.seekTo(0);
     setCurrentFrame(0);
-    draw(0);
-  }, [draw]);
-
-  // Cleanup
-  useEffect(() => {
-    return () => cancelAnimationFrame(rafRef.current);
+    setPlaying(false);
   }, []);
+
+  const seek = useCallback((frame: number) => {
+    const p = playerRef.current;
+    if (!p) return;
+    const clamped = Math.max(0, Math.min(frame, scene.durationInFrames - 1));
+    p.seekTo(clamped);
+    setCurrentFrame(clamped);
+  }, [scene.durationInFrames]);
 
   // Stop when scene changes
   useEffect(() => {
-    pause();
-    frameRef.current = 0;
+    setPlaying(false);
     setCurrentFrame(0);
-  }, [scene, pause]);
+    playerRef.current?.seekTo(0);
+  }, [scene.componentCode]);
 
-  const seek = useCallback((frame: number) => {
-    if (!scene) return;
-    const clamped = Math.max(0, Math.min(frame, scene.duration - 1));
-    frameRef.current = clamped;
-    setCurrentFrame(clamped);
-    draw(clamped);
-  }, [scene, draw]);
-
-  return { canvasRef, playing, currentFrame, togglePlay, reset, seek, draw };
+  return {
+    playerRef,
+    DynamicComponent,
+    playing,
+    setPlaying,
+    currentFrame,
+    setCurrentFrame,
+    togglePlay,
+    reset,
+    seek,
+  };
 }

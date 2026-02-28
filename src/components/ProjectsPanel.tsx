@@ -1,11 +1,12 @@
 import { Film, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { RemotionScene } from "@/lib/scene-types";
 
 export interface SavedProject {
   id: string;
   name: string;
   createdAt: number;
-  scene: import("@/lib/scene-types").Scene;
+  scene: RemotionScene;
 }
 
 interface ProjectsPanelProps {
@@ -34,7 +35,7 @@ export function ProjectsPanel({ projects, onLoad, onDelete }: ProjectsPanelProps
               <div className="text-xs min-w-0 flex-1">
                 <p className="font-medium truncate">{p.name}</p>
                 <p className="text-muted-foreground">
-                  {p.scene.width}×{p.scene.height} · {(p.scene.duration / p.scene.fps).toFixed(1)}s
+                  {p.scene.width}×{p.scene.height} · {(p.scene.durationInFrames / p.scene.fps).toFixed(1)}s
                 </p>
                 <p className="text-muted-foreground text-[10px]">
                   {new Date(p.createdAt).toLocaleDateString()}

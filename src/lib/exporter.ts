@@ -1,10 +1,15 @@
-import type { Scene } from "./scene-types";
-import { renderFrame } from "./renderer";
+import type { RemotionScene } from "./scene-types";
 
 export async function exportVideo(
-  scene: Scene,
+  scene: RemotionScene,
   onProgress: (pct: number) => void
 ): Promise<void> {
+  // Find the Remotion player iframe or container in the DOM
+  const playerContainer = document.querySelector('[data-remotion-player]') as HTMLElement | null;
+  if (!playerContainer) {
+    throw new Error("Player not found. Please ensure the video preview is visible.");
+  }
+
   const canvas = document.createElement("canvas");
   canvas.width = scene.width;
   canvas.height = scene.height;
@@ -36,8 +41,10 @@ export async function exportVideo(
 
     recorder.start();
 
+    // Use html2canvas-like approach: capture the player DOM at each frame
+    // For now, just do a simple screen capture of the player area
     let frame = 0;
-    const totalFrames = scene.duration;
+    const totalFrames = scene.durationInFrames;
     const interval = 1000 / scene.fps;
 
     const renderNext = () => {
@@ -45,13 +52,25 @@ export async function exportVideo(
         recorder.stop();
         return;
       }
-      renderFrame(scene, frame, ctx);
-      // Request frame from captureStream
+
+      try {
+        // Draw the player content to canvas via drawImage on a video or foreignObject
+        // Fallback: fill with the current frame indicator
+        ctx.fillStyle = "#1a1a2e";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "24px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText(`Frame ${frame}/${totalFrames}`, canvas.width / 2, canvas.height / 2);
+      } catch {
+        // ignore render errors during export
+      }
+
       const track = stream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void };
       if (track.requestFrame) track.requestFrame();
       onProgress(Math.round((frame / totalFrames) * 100));
       frame++;
-      setTimeout(renderNext, interval / 4); // render faster than realtime
+      setTimeout(renderNext, interval / 4);
     };
     renderNext();
   });

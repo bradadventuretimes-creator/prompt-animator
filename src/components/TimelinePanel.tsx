@@ -3,6 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Play, Pause, SkipBack, SkipForward, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { useRef, useCallback } from "react";
 
+export interface TimelineClip {
+  id: string;
+  name: string;
+  startFrame: number;
+  durationInFrames: number;
+  color: string;
+}
+
 interface TimelinePanelProps {
   scene: RemotionScene;
   currentFrame: number;
@@ -10,9 +18,12 @@ interface TimelinePanelProps {
   onSeek?: (frame: number) => void;
   onTogglePlay?: () => void;
   onReset?: () => void;
+  clips?: TimelineClip[];
 }
 
-export function TimelinePanel({ scene, currentFrame, playing, onSeek, onTogglePlay, onReset }: TimelinePanelProps) {
+const CLIP_COLORS = ["bg-emerald-500", "bg-blue-500", "bg-purple-500", "bg-amber-500", "bg-rose-500", "bg-cyan-500"];
+
+export function TimelinePanel({ scene, currentFrame, playing, onSeek, onTogglePlay, onReset, clips = [] }: TimelinePanelProps) {
   const totalSeconds = scene.durationInFrames / scene.fps;
   const tickCount = Math.ceil(totalSeconds);
   const playheadPct = (currentFrame / scene.durationInFrames) * 100;
@@ -24,6 +35,14 @@ export function TimelinePanel({ scene, currentFrame, playing, onSeek, onTogglePl
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     onSeek(Math.round(pct * (scene.durationInFrames - 1)));
   }, [onSeek, scene.durationInFrames]);
+
+  const displayClips = clips.length > 0 ? clips : [{
+    id: "main",
+    name: scene.metadata?.title || "Composition",
+    startFrame: 0,
+    durationInFrames: scene.durationInFrames,
+    color: CLIP_COLORS[0],
+  }];
 
   return (
     <div className="bg-card border-t border-border flex flex-col" style={{ height: "220px" }}>
@@ -40,7 +59,8 @@ export function TimelinePanel({ scene, currentFrame, playing, onSeek, onTogglePl
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onSeek?.(Math.min(scene.durationInFrames - 1, currentFrame + scene.fps))}><SkipForward className="h-3 w-3" /></Button>
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onSeek?.(Math.min(scene.durationInFrames - 1, currentFrame + 1))}><ChevronRight className="h-3 w-3" /></Button>
         </div>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1 text-muted-foreground">
+          <span className="text-[10px]">{clips.length > 0 ? `${clips.length} clips` : "1 clip"}</span>
           <Button variant="ghost" size="icon" className="h-6 w-6"><ZoomOut className="h-3 w-3" /></Button>
           <Button variant="ghost" size="icon" className="h-6 w-6"><ZoomIn className="h-3 w-3" /></Button>
         </div>
@@ -61,17 +81,24 @@ export function TimelinePanel({ scene, currentFrame, playing, onSeek, onTogglePl
             <div className="w-2.5 h-2.5 bg-destructive rounded-sm -ml-[5px] -mt-0.5" />
           </div>
 
-          {/* Single composition track */}
-          <div className="h-8 relative border-b border-border/30">
-            <div
-              className="absolute top-1 bottom-1 track-teal rounded-sm flex items-center px-2"
-              style={{ left: "0%", width: "100%" }}
-            >
-              <span className="text-[10px] text-white font-medium truncate">
-                {scene.metadata?.title || "Composition"}
-              </span>
-            </div>
-          </div>
+          {/* Clip tracks */}
+          {displayClips.map((clip, idx) => {
+            const leftPct = (clip.startFrame / scene.durationInFrames) * 100;
+            const widthPct = (clip.durationInFrames / scene.durationInFrames) * 100;
+            const colorClass = clip.color || CLIP_COLORS[idx % CLIP_COLORS.length];
+            return (
+              <div key={clip.id} className="h-8 relative border-b border-border/30">
+                <div
+                  className={`absolute top-1 bottom-1 ${colorClass} rounded-sm flex items-center px-2 opacity-90`}
+                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                >
+                  <span className="text-[10px] text-white font-medium truncate">
+                    {clip.name}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

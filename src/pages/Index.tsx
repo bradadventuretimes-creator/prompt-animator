@@ -4,10 +4,10 @@ import { useSceneEditor } from "@/hooks/use-scene-editor";
 import { exportVideo } from "@/lib/exporter";
 import type { AppStatus, RemotionScene } from "@/lib/scene-types";
 import { SidebarNav } from "@/components/SidebarNav";
-import { ChatPanel } from "@/components/ChatPanel";
+import { ChatPanel, type ChatMessage } from "@/components/ChatPanel";
 import { VideoPreview } from "@/components/VideoPreview";
 import { EditingPanel } from "@/components/EditingPanel";
-import { TimelinePanel } from "@/components/TimelinePanel";
+import { TimelinePanel, type TimelineClip } from "@/components/TimelinePanel";
 import { ProjectsPanel, type SavedProject } from "@/components/ProjectsPanel";
 import { NewProjectDialog } from "@/components/NewProjectDialog";
 import { useToast } from "@/hooks/use-toast";
@@ -26,6 +26,19 @@ function saveProjects(projects: SavedProject[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
 }
 
+function generateSuggestions(prompt: string): string[] {
+  const lower = prompt.toLowerCase();
+  const suggestions: string[] = [];
+  if (lower.includes("logo") || lower.includes("brand")) {
+    suggestions.push("Add particle effects", "Make it 3D", "Add tagline text");
+  } else if (lower.includes("explainer") || lower.includes("product")) {
+    suggestions.push("Add screen recording", "Add pricing slide", "Make it longer");
+  } else {
+    suggestions.push("Add more motion", "Change colors", "Make it slower");
+  }
+  return suggestions;
+}
+
 const Index = () => {
   const [prompt, setPrompt] = useState("");
   const [status, setStatus] = useState<AppStatus>("idle");
@@ -38,6 +51,8 @@ const Index = () => {
   const [projects, setProjects] = useState<SavedProject[]>(loadProjects);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [streamingCode, setStreamingCode] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [clips, setClips] = useState<TimelineClip[]>([]);
   const { toast } = useToast();
 
   const playerRef = useRef<{ seek: (f: number) => void; togglePlay: () => void; reset: () => void } | null>(null);
@@ -51,11 +66,28 @@ const Index = () => {
     replaceScene,
   } = useSceneEditor(DEFAULT_REMOTION_SCENE);
 
+  const addMessage = useCallback((role: "user" | "assistant", content: string, suggestions?: string[]) => {
+    const msg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role,
+      content,
+      timestamp: Date.now(),
+      suggestions,
+    };
+    setMessages((prev) => [...prev, msg]);
+    return msg;
+  }, []);
+
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) {
       toast({ title: "Enter a prompt", description: "Describe the animation you want to create." });
       return;
     }
+
+    addMessage("user", prompt);
+    const currentPrompt = prompt;
+    setPrompt("");
+
     try {
       const ai = await import("@/lib/ai");
       if (!ai.isModelLoaded()) {
@@ -68,7 +100,7 @@ const Index = () => {
       setStatus("generating");
       setStreamingCode("");
 
-      const newScene = await ai.generateSceneStreaming(prompt, (accumulated) => {
+      const newScene = await ai.generateSceneStreaming(currentPrompt, (accumulated) => {
         setStreamingCode(accumulated);
       });
 
@@ -76,9 +108,26 @@ const Index = () => {
       setStreamingCode("");
       setStatus("idle");
 
+      // Add clip to timeline
+      const clipName = currentPrompt.slice(0, 30);
+      setClips((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          name: clipName,
+          startFrame: 0,
+          durationInFrames: newScene.durationInFrames,
+          color: "",
+        },
+      ]);
+
+      // AI response with suggestions
+      const suggestions = generateSuggestions(currentPrompt);
+      addMessage("assistant", `Generated "${clipName}" — ${(newScene.durationInFrames / newScene.fps).toFixed(1)}s at ${newScene.width}×${newScene.height}. How would you like to refine it?`, suggestions);
+
       const project: SavedProject = {
         id: crypto.randomUUID(),
-        name: prompt.slice(0, 50),
+        name: currentPrompt.slice(0, 50),
         createdAt: Date.now(),
         scene: newScene,
       };
@@ -93,9 +142,14 @@ const Index = () => {
       const msg = err instanceof Error ? err.message : "Generation failed";
       setStatus("idle");
       setStreamingCode("");
+      addMessage("assistant", `Error: ${msg}. Try a simpler prompt or re-download the model in Settings.`);
       toast({ title: "Error", description: msg, variant: "destructive" });
     }
-  }, [prompt, replaceScene, toast]);
+  }, [prompt, replaceScene, toast, addMessage]);
+
+  const handleSuggestionClick = useCallback((suggestion: string) => {
+    setPrompt(suggestion);
+  }, []);
 
   const handleExport = useCallback(async () => {
     setStatus("exporting");
@@ -121,6 +175,8 @@ const Index = () => {
     };
     replaceScene(blank);
     setPrompt("");
+    setMessages([]);
+    setClips([]);
     toast({ title: "New project", description: `Created ${w}×${h} composition.` });
   }, [replaceScene, toast]);
 
@@ -149,7 +205,6 @@ const Index = () => {
   const isExporting = status === "exporting";
   const isGenerating = status === "generating";
 
-  // Show media info when "media" tab is active — inline in sidebar panel
   const renderSidePanel = () => {
     switch (activeTab) {
       case "chat":
@@ -162,6 +217,8 @@ const Index = () => {
             modelProgress={modelProgress}
             modelProgressText={modelProgressText}
             streamingCode={streamingCode}
+            messages={messages}
+            onSuggestionClick={handleSuggestionClick}
           />
         );
       case "projects":
@@ -177,7 +234,6 @@ const Index = () => {
               <div className="flex justify-between"><span>FPS</span><span className="font-mono text-foreground">{scene.fps}</span></div>
               <div className="flex justify-between"><span>Duration</span><span className="font-mono text-foreground">{(scene.durationInFrames / scene.fps).toFixed(1)}s</span></div>
               <div className="flex justify-between"><span>Frames</span><span className="font-mono text-foreground">{scene.durationInFrames}</span></div>
-              {scene.metadata?.title && <div className="flex justify-between"><span>Title</span><span className="text-foreground">{scene.metadata.title}</span></div>}
             </div>
           </div>
         );
@@ -244,6 +300,7 @@ const Index = () => {
         onSeek={(f) => playerRef.current?.seek(f)}
         onTogglePlay={() => playerRef.current?.togglePlay()}
         onReset={() => playerRef.current?.reset()}
+        clips={clips}
       />
 
       <NewProjectDialog open={showNewDialog} onOpenChange={setShowNewDialog} onCreate={handleNewProject} />

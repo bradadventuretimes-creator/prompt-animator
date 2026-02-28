@@ -3,7 +3,7 @@ import { usePlayer } from "@/hooks/use-player";
 import { Player } from "@remotion/player";
 import { Play, Pause, RotateCcw, Maximize } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 
 interface VideoPreviewProps {
   scene: RemotionScene;
@@ -14,11 +14,11 @@ interface VideoPreviewProps {
 
 export function VideoPreview({ scene, onFrameUpdate, onPlayingChange, onPlayerReady }: VideoPreviewProps) {
   const { playerRef, DynamicComponent, playing, setPlaying, currentFrame, setCurrentFrame, togglePlay, reset, seek } = usePlayer(scene);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const totalSeconds = scene.durationInFrames / scene.fps;
   const currentSeconds = currentFrame / scene.fps;
 
-  // Listen to player events via ref
   useEffect(() => {
     const p = playerRef.current;
     if (!p) return;
@@ -43,17 +43,9 @@ export function VideoPreview({ scene, onFrameUpdate, onPlayingChange, onPlayerRe
     };
   }, [playerRef, setPlaying, setCurrentFrame, DynamicComponent]);
 
-  useEffect(() => {
-    onFrameUpdate?.(currentFrame);
-  }, [currentFrame, onFrameUpdate]);
-
-  useEffect(() => {
-    onPlayingChange?.(playing);
-  }, [playing, onPlayingChange]);
-
-  useEffect(() => {
-    onPlayerReady?.({ seek, togglePlay, reset });
-  }, [seek, togglePlay, reset, onPlayerReady]);
+  useEffect(() => { onFrameUpdate?.(currentFrame); }, [currentFrame, onFrameUpdate]);
+  useEffect(() => { onPlayingChange?.(playing); }, [playing, onPlayingChange]);
+  useEffect(() => { onPlayerReady?.({ seek, togglePlay, reset }); }, [seek, togglePlay, reset, onPlayerReady]);
 
   const handleSeekBar = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -61,13 +53,23 @@ export function VideoPreview({ scene, onFrameUpdate, onPlayingChange, onPlayerRe
     seek(Math.round(pct * scene.durationInFrames));
   }, [seek, scene.durationInFrames]);
 
+  const handleFullscreen = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      el.requestFullscreen().catch(() => {});
+    }
+  }, []);
+
   return (
     <div className="flex-1 flex flex-col bg-card">
       <div className="p-3 border-b border-border flex items-center justify-between">
         <h2 className="font-semibold text-sm">Video Player</h2>
       </div>
       <div className="flex-1 flex items-center justify-center p-4 bg-background/50">
-        <div className="relative rounded-xl overflow-hidden shadow-2xl bg-black w-full max-w-3xl">
+        <div ref={containerRef} className="relative rounded-xl overflow-hidden shadow-2xl bg-black w-full max-w-3xl">
           <Player
             ref={playerRef}
             component={DynamicComponent}
@@ -90,7 +92,9 @@ export function VideoPreview({ scene, onFrameUpdate, onPlayingChange, onPlayerRe
               <Button variant="ghost" size="icon" onClick={reset} className="h-7 w-7 text-white/60 hover:text-white hover:bg-white/10">
                 <RotateCcw className="h-3.5 w-3.5" />
               </Button>
-              <Maximize className="h-4 w-4 text-white/60 cursor-pointer hover:text-white" />
+              <Button variant="ghost" size="icon" onClick={handleFullscreen} className="h-7 w-7 text-white/60 hover:text-white hover:bg-white/10">
+                <Maximize className="h-3.5 w-3.5" />
+              </Button>
             </div>
             <div
               className="mt-2 w-full bg-white/20 rounded-full h-1 cursor-pointer"

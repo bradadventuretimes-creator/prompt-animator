@@ -62,8 +62,8 @@ export function validateScene(raw: unknown): Scene | null {
   };
 }
 
-/** Validate Remotion scene from AI output */
-export function validateRemotionScene(raw: unknown): RemotionScene | null {
+/** Validate Remotion scene from AI output — returns partial without id/name */
+export function validateRemotionScene(raw: unknown): Omit<RemotionScene, "id" | "name" | "voiceover"> | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
 

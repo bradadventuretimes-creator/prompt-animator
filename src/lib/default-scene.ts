@@ -1,6 +1,8 @@
-import type { RemotionScene } from "./scene-types";
+import type { RemotionScene, VideoProject } from "./scene-types";
 
 export const DEFAULT_REMOTION_SCENE: RemotionScene = {
+  id: "welcome",
+  name: "Welcome",
   width: 1280,
   height: 720,
   fps: 30,
@@ -30,13 +32,6 @@ return React.createElement("div", {
   }),
   React.createElement("div", {
     style: {
-      position: "absolute", width: 80, height: 80, borderRadius: "50%",
-      background: "radial-gradient(circle, rgba(140,80,220,0.3) 0%, transparent 70%)",
-      transform: "scale(" + (circleScale * 0.8) + ")", bottom: "20%", right: "20%"
-    }
-  }),
-  React.createElement("div", {
-    style: {
       fontSize: 52, fontWeight: 700, color: "#e0e0ff",
       opacity: titleOpacity, transform: "translateY(" + titleY + "px)",
       textShadow: "0 2px 20px rgba(230,170,60,0.3)"
@@ -53,4 +48,13 @@ return React.createElement("div", {
     title: "Welcome",
     description: "Default welcome animation",
   },
+};
+
+export const DEFAULT_PROJECT: VideoProject = {
+  id: "default",
+  name: "Untitled Project",
+  createdAt: Date.now(),
+  scenes: [DEFAULT_REMOTION_SCENE],
+  activeSceneIndex: 0,
+  globalSettings: { width: 1280, height: 720, fps: 30 },
 };

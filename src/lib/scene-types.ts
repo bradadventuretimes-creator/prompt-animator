@@ -27,8 +27,10 @@ export interface Scene {
   elements: SceneElement[];
 }
 
-/** New Remotion-based scene */
+/** Remotion-based scene */
 export interface RemotionScene {
+  id: string;
+  name: string;
   componentCode: string;
   width: number;
   height: number;
@@ -38,6 +40,23 @@ export interface RemotionScene {
     title?: string;
     description?: string;
   };
+  voiceover?: {
+    text: string;
+    audioUrl: string;
+  };
 }
 
-export type AppStatus = "idle" | "loading-model" | "generating" | "rendering" | "exporting";
+export interface VideoProject {
+  id: string;
+  name: string;
+  createdAt: number;
+  scenes: RemotionScene[];
+  activeSceneIndex: number;
+  globalSettings: {
+    width: number;
+    height: number;
+    fps: number;
+  };
+}
+
+export type AppStatus = "idle" | "loading-model" | "generating" | "rendering" | "exporting" | "generating-voice";

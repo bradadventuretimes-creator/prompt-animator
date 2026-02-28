@@ -1,4 +1,4 @@
-import { Plus, FolderOpen, MessageSquare, Code, Image } from "lucide-react";
+import { Plus, FolderOpen, MessageSquare, Code } from "lucide-react";
 import { SettingsDialog } from "@/components/SettingsDialog";
 
 interface SidebarNavProps {
@@ -10,7 +10,6 @@ const NAV_ITEMS = [
   { id: "new", icon: Plus, label: "New" },
   { id: "projects", icon: FolderOpen, label: "Projects" },
   { id: "chat", icon: MessageSquare, label: "Chat" },
-  { id: "media", icon: Image, label: "Media" },
   { id: "code", icon: Code, label: "Code" },
 ];
 

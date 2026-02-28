@@ -43,6 +43,19 @@ Your role:
 
 DO NOT output code or JSON. Just have a natural conversation.`;
 
+const SCRIPT_SYSTEM_PROMPT = `You are a video scriptwriter. Given a topic, write a structured video script.
+Output ONLY a JSON array, nothing else. No markdown, no backticks, no explanation.
+
+Format:
+[{"title":"Scene Title","narration":"What the narrator says","visualDescription":"What to show visually","durationSeconds":5}]
+
+Rules:
+- Each scene should be 3-8 seconds
+- Total duration should match user's requested length (default 15 seconds if not specified)
+- Narration should be natural spoken text
+- Visual descriptions should be detailed enough for a motion graphics generator
+- Output ONLY the JSON array`;
+
 export async function loadModel(
   onProgress: (progress: number, text: string) => void
 ): Promise<void> {
@@ -245,6 +258,155 @@ export async function generateSceneStreaming(
     ...scene,
     voiceoverText: parsed.voiceoverText,
   };
+}
+
+export interface ScriptScene {
+  title: string;
+  narration: string;
+  visualDescription: string;
+  durationSeconds: number;
+}
+
+/** Generate a video script (JSON array of scenes) */
+export async function generateScript(
+  prompt: string,
+  onToken: (accumulated: string) => void
+): Promise<ScriptScene[]> {
+  if (!engine) throw new Error("Model not loaded. Go to Settings to download the AI model first.");
+
+  const requestedDuration = parseDuration(prompt, 1); // just get seconds
+  const durationHint = requestedDuration ? `Total video duration: ${requestedDuration} seconds.` : "Total video duration: 15 seconds.";
+
+  const messages: webllm.ChatCompletionMessageParam[] = [
+    { role: "system", content: SCRIPT_SYSTEM_PROMPT + "\n\n" + durationHint },
+    { role: "user", content: prompt },
+  ];
+
+  let accumulated = "";
+  const chunks = await engine.chat.completions.create({
+    messages,
+    temperature: 0.3,
+    max_tokens: 2000,
+    stream: true,
+  });
+
+  for await (const chunk of chunks) {
+    const delta = chunk.choices[0]?.delta?.content || "";
+    accumulated += delta;
+    onToken(accumulated);
+  }
+
+  // Parse the script JSON
+  const trimmed = accumulated.trim();
+  let parsed: ScriptScene[];
+
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    // Try extracting from fences
+    const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) {
+      parsed = JSON.parse(fenceMatch[1].trim());
+    } else {
+      const arrayMatch = trimmed.match(/\[[\s\S]*\]/);
+      if (arrayMatch) {
+        parsed = JSON.parse(arrayMatch[0]);
+      } else {
+        throw new Error("Could not parse script output.");
+      }
+    }
+  }
+
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error("Script output is empty or invalid.");
+  }
+
+  return parsed;
+}
+
+export interface WorkflowCallbacks {
+  onStepChange: (step: string, detail: string) => void;
+  onScriptToken: (text: string) => void;
+  onCodeToken: (code: string) => void;
+  onSceneReady: (scene: RemotionScene) => void;
+  onChatMessage: (content: string) => void;
+  fps: number;
+  width: number;
+  height: number;
+}
+
+/** Full workflow: Script -> Audio -> Visuals */
+export async function generateVideoWorkflow(
+  prompt: string,
+  callbacks: WorkflowCallbacks
+): Promise<RemotionScene[]> {
+  const { fps, width, height } = callbacks;
+  const scenes: RemotionScene[] = [];
+
+  // Step 1: Generate Script
+  callbacks.onStepChange("scripting", "Writing video script...");
+  const script = await generateScript(prompt, callbacks.onScriptToken);
+  callbacks.onChatMessage(`📝 Script ready — ${script.length} scene(s):\n${script.map((s, i) => `${i + 1}. **${s.title}** (${s.durationSeconds}s) — "${s.narration}"`).join("\n")}`);
+
+  // Step 2: Generate Audio for each scene
+  callbacks.onStepChange("generating-audio", "Generating voiceovers...");
+  const audioUrls: (string | null)[] = [];
+  for (let i = 0; i < script.length; i++) {
+    const s = script[i];
+    if (s.narration && s.narration.trim()) {
+      callbacks.onStepChange("generating-audio", `Generating voiceover for scene ${i + 1}/${script.length}...`);
+      try {
+        const tts = await import("@/lib/tts");
+        const audioUrl = await tts.generateVoiceover(s.narration, (pct, msg) => {
+          callbacks.onStepChange("generating-audio", `TTS scene ${i + 1}: ${msg} (${pct}%)`);
+        });
+        audioUrls.push(audioUrl);
+      } catch {
+        audioUrls.push(null);
+      }
+    } else {
+      audioUrls.push(null);
+    }
+  }
+  callbacks.onChatMessage(`🎙 Voiceovers generated for ${audioUrls.filter(Boolean).length}/${script.length} scenes.`);
+
+  // Step 3: Generate visuals for each scene
+  callbacks.onStepChange("generating-visuals", "Creating visuals...");
+  for (let i = 0; i < script.length; i++) {
+    const s = script[i];
+    const durationInFrames = s.durationSeconds * fps;
+
+    callbacks.onStepChange("generating-visuals", `Creating visuals for scene ${i + 1}/${script.length}: ${s.title}...`);
+
+    const visualPrompt = `Create a motion graphics scene: ${s.visualDescription}. Title: "${s.title}". Duration: ${s.durationSeconds} seconds.`;
+
+    const result = await generateSceneStreaming(visualPrompt, callbacks.onCodeToken, {
+      forceDurationFrames: durationInFrames,
+      fps,
+    });
+
+    const scene: RemotionScene = {
+      id: result.id,
+      name: s.title,
+      componentCode: result.componentCode,
+      width,
+      height,
+      fps,
+      durationInFrames,
+    };
+
+    if (audioUrls[i]) {
+      scene.voiceover = { text: s.narration, audioUrl: audioUrls[i]! };
+    }
+
+    scenes.push(scene);
+    callbacks.onSceneReady(scene);
+  }
+
+  callbacks.onChatMessage(`✅ Done! ${scenes.length} scene(s) created with ${audioUrls.filter(Boolean).length} voiceover(s).`);
+  callbacks.onStepChange("", "");
+
+  return scenes;
 }
 
 export function isModelLoaded(): boolean {

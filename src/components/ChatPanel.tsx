@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Send, Loader2, Sparkles, Bot, User } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AppStatus } from "@/lib/scene-types";
 
 export interface ChatMessage {
@@ -20,7 +19,9 @@ interface ChatPanelProps {
   status: AppStatus;
   modelProgress: number;
   modelProgressText: string;
-  streamingCode: string;
+  streamingChat: string;
+  workflowStep: string;
+  workflowDetail: string;
   messages: ChatMessage[];
   onSuggestionClick?: (suggestion: string) => void;
 }
@@ -32,18 +33,33 @@ export function ChatPanel({
   status,
   modelProgress,
   modelProgressText,
-  streamingCode,
+  streamingChat,
+  workflowStep,
+  workflowDetail,
   messages,
   onSuggestionClick,
 }: ChatPanelProps) {
-  const isLoading = status === "loading-model" || status === "generating";
+  const isLoading = status !== "idle";
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, streamingCode]);
+  }, [messages, streamingChat, workflowStep]);
+
+  const statusLabel = (() => {
+    switch (status) {
+      case "loading-model": return "Loading model...";
+      case "generating": return "Generating...";
+      case "scripting": return "Writing script...";
+      case "generating-audio": return "Generating voiceover...";
+      case "generating-visuals": return "Creating visuals...";
+      case "generating-voice": return "Generating voice...";
+      case "exporting": return "Exporting...";
+      default: return "";
+    }
+  })();
 
   return (
     <div className="w-72 bg-card border-r border-border flex flex-col shrink-0">
@@ -56,13 +72,13 @@ export function ChatPanel({
           <div className="p-2.5 bg-primary/10 border border-primary/20 rounded-lg">
             <p className="text-[11px] text-foreground leading-relaxed">
               <Sparkles className="h-3 w-3 inline mr-1 text-primary" />
-              Describe the video you want. I'll generate it and ask follow-up questions to refine it.
+              Describe the video you want. I'll write a script, generate voiceover, and create the visuals step by step.
             </p>
           </div>
         )}
 
         {messages.map((msg) => (
-          <div key={msg.id} className={`flex gap-2 ${msg.role === "user" ? "" : ""}`}>
+          <div key={msg.id} className="flex gap-2">
             <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${msg.role === "user" ? "bg-primary/20" : "bg-muted"}`}>
               {msg.role === "user" ? <User className="h-3 w-3 text-primary" /> : <Bot className="h-3 w-3 text-muted-foreground" />}
             </div>
@@ -85,6 +101,19 @@ export function ChatPanel({
           </div>
         ))}
 
+        {/* Live streaming chat response */}
+        {streamingChat && (
+          <div className="flex gap-2">
+            <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-muted">
+              <Bot className="h-3 w-3 text-muted-foreground" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] text-foreground leading-relaxed whitespace-pre-wrap">{streamingChat}<span className="animate-pulse text-primary">▍</span></p>
+            </div>
+          </div>
+        )}
+
+        {/* Status indicators */}
         {status === "loading-model" && (
           <div className="p-2.5 bg-muted rounded-lg space-y-1.5">
             <div className="flex items-center gap-2">
@@ -98,16 +127,14 @@ export function ChatPanel({
           </div>
         )}
 
-        {status === "generating" && (
-          <div className="p-2.5 bg-muted rounded-lg space-y-1.5">
+        {statusLabel && status !== "loading-model" && status !== "idle" && (
+          <div className="p-2.5 bg-muted rounded-lg space-y-1">
             <div className="flex items-center gap-2">
               <Loader2 className="h-3 w-3 animate-spin text-primary" />
-              <span className="text-xs font-medium">Generating...</span>
+              <span className="text-xs font-medium">{statusLabel}</span>
             </div>
-            {streamingCode && (
-              <div className="text-[10px] text-muted-foreground font-mono">
-                {streamingCode.length} chars received
-              </div>
+            {workflowDetail && (
+              <p className="text-[10px] text-muted-foreground">{workflowDetail}</p>
             )}
           </div>
         )}

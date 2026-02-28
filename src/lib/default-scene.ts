@@ -55,6 +55,15 @@ export const DEFAULT_PROJECT: VideoProject = {
   name: "Untitled Project",
   createdAt: Date.now(),
   scenes: [DEFAULT_REMOTION_SCENE],
+  files: [
+    {
+      id: "file-welcome",
+      path: "scenes/welcome.jsx",
+      content: DEFAULT_REMOTION_SCENE.componentCode,
+      sceneId: "welcome",
+      type: "scene",
+    },
+  ],
   activeSceneIndex: 0,
   globalSettings: { width: 1280, height: 720, fps: 30 },
 };

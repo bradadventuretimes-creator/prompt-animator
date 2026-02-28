@@ -46,11 +46,20 @@ export interface RemotionScene {
   };
 }
 
+export interface ProjectFile {
+  id: string;
+  path: string;
+  content: string;
+  sceneId?: string;
+  type: "scene" | "audio" | "config";
+}
+
 export interface VideoProject {
   id: string;
   name: string;
   createdAt: number;
   scenes: RemotionScene[];
+  files: ProjectFile[];
   activeSceneIndex: number;
   globalSettings: {
     width: number;
@@ -59,4 +68,4 @@ export interface VideoProject {
   };
 }
 
-export type AppStatus = "idle" | "loading-model" | "generating" | "rendering" | "exporting" | "generating-voice";
+export type AppStatus = "idle" | "loading-model" | "generating" | "rendering" | "exporting" | "generating-voice" | "scripting" | "generating-audio" | "generating-visuals";

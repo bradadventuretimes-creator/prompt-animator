@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from "react";
 import { DEFAULT_PROJECT } from "@/lib/default-scene";
 import { useProjectEditor } from "@/hooks/use-scene-editor";
 import { exportVideo } from "@/lib/exporter";
-import type { AppStatus, RemotionScene, VideoProject } from "@/lib/scene-types";
+import type { AppStatus, RemotionScene, VideoProject, ProjectFile } from "@/lib/scene-types";
 import { SidebarNav } from "@/components/SidebarNav";
 import { ChatPanel, type ChatMessage } from "@/components/ChatPanel";
 import { VideoPreview } from "@/components/VideoPreview";
@@ -27,6 +27,10 @@ function saveProjects(projects: SavedProject[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
 }
 
+function slugify(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "scene";
+}
+
 const Index = () => {
   const [prompt, setPrompt] = useState("");
   const [status, setStatus] = useState<AppStatus>("idle");
@@ -39,7 +43,11 @@ const Index = () => {
   const [projects, setProjects] = useState<SavedProject[]>(loadProjects);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [streamingCode, setStreamingCode] = useState("");
+  const [streamingChat, setStreamingChat] = useState("");
+  const [workflowStep, setWorkflowStep] = useState("");
+  const [workflowDetail, setWorkflowDetail] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>(DEFAULT_PROJECT.files);
   const { toast } = useToast();
 
   const playerRef = useRef<{ seek: (f: number) => void; togglePlay: () => void; reset: () => void } | null>(null);
@@ -67,6 +75,29 @@ const Index = () => {
     return msg;
   }, []);
 
+  const addFileForScene = useCallback((scene: RemotionScene) => {
+    const fileName = slugify(scene.name);
+    const file: ProjectFile = {
+      id: crypto.randomUUID(),
+      path: `scenes/${fileName}.jsx`,
+      content: scene.componentCode,
+      sceneId: scene.id,
+      type: "scene",
+    };
+    setProjectFiles((prev) => [...prev, file]);
+
+    if (scene.voiceover?.audioUrl) {
+      const audioFile: ProjectFile = {
+        id: crypto.randomUUID(),
+        path: `audio/${fileName}-voiceover.wav`,
+        content: "[audio blob]",
+        sceneId: scene.id,
+        type: "audio",
+      };
+      setProjectFiles((prev) => [...prev, audioFile]);
+    }
+  }, []);
+
   const ensureModel = useCallback(async () => {
     const ai = await import("@/lib/ai");
     if (!ai.isModelLoaded()) {
@@ -81,7 +112,7 @@ const Index = () => {
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) {
-      toast({ title: "Enter a prompt", description: "Describe the animation you want to create." });
+      toast({ title: "Enter a prompt", description: "Describe the video you want to create." });
       return;
     }
 
@@ -95,7 +126,7 @@ const Index = () => {
       const ai = await ensureModel();
 
       if (!isGenerateIntent) {
-        // Chat mode
+        // Chat mode — stream to chat panel only
         setStatus("generating");
         const chatHistory = messages.map((m) => ({ role: m.role, content: m.content }));
         chatHistory.push({ role: "user" as const, content: currentPrompt });
@@ -103,61 +134,66 @@ const Index = () => {
         let response = "";
         await ai.chatWithAI(chatHistory, (accumulated) => {
           response = accumulated;
-          setStreamingCode(accumulated);
+          setStreamingChat(accumulated);
         });
 
-        setStreamingCode("");
+        setStreamingChat("");
         setStatus("idle");
         addMessage("assistant", response, ["Generate it now", "Tell me more", "Change the style"]);
         return;
       }
 
-      // Generate mode
-      setStatus("generating");
+      // Generate mode — full workflow: Script -> Audio -> Visuals
       setStreamingCode("");
+      setStreamingChat("");
 
-      const chatHistory = messages.map((m) => ({ role: m.role, content: m.content }));
-
-      const result = await ai.generateSceneStreaming(currentPrompt, (accumulated) => {
-        setStreamingCode(accumulated);
-      }, {
-        existingCode: activeScene.componentCode,
-        messageHistory: chatHistory,
+      const scenes = await ai.generateVideoWorkflow(currentPrompt, {
+        onStepChange: (step, detail) => {
+          setStatus(step as AppStatus || "idle");
+          setWorkflowStep(step);
+          setWorkflowDetail(detail);
+        },
+        onScriptToken: (text) => {
+          // Script streaming shown as workflow detail
+          setWorkflowDetail(`Writing script... (${text.length} chars)`);
+        },
+        onCodeToken: (code) => {
+          setStreamingCode(code);
+        },
+        onSceneReady: (scene) => {
+          addScene(scene);
+          addFileForScene(scene);
+        },
+        onChatMessage: (content) => {
+          addMessage("assistant", content);
+        },
         fps: project.globalSettings.fps,
+        width: project.globalSettings.width,
+        height: project.globalSettings.height,
       });
 
-      const newScene: RemotionScene = {
-        id: result.id,
-        name: result.name,
-        componentCode: result.componentCode,
-        width: result.width,
-        height: result.height,
-        fps: result.fps,
-        durationInFrames: result.durationInFrames,
-      };
-
-      // If voiceover text was suggested, attach it
-      if (result.voiceoverText) {
-        newScene.voiceover = { text: result.voiceoverText, audioUrl: "" };
-      }
-
-      addScene(newScene);
       setStreamingCode("");
       setStatus("idle");
+      setWorkflowStep("");
+      setWorkflowDetail("");
 
-      const durationSec = (newScene.durationInFrames / newScene.fps).toFixed(1);
-      const suggestions = ["Add more scenes", "Change colors", "Add voiceover", "Make it longer"];
-      addMessage("assistant", `Generated "${newScene.name}" — ${durationSec}s at ${newScene.width}×${newScene.height}. ${result.voiceoverText ? 'Voiceover text suggested — click "Add voiceover" to generate audio.' : ""}`, suggestions);
+      const totalDuration = scenes.reduce((sum, s) => sum + s.durationInFrames / s.fps, 0).toFixed(1);
+      addMessage("assistant", `🎬 Video complete! ${scenes.length} scenes, ${totalDuration}s total.`, [
+        "Add more scenes", "Change the style", "Make it longer", "Export video"
+      ]);
 
-      toast({ title: "Scene generated!", description: `${durationSec}s animation added.` });
+      toast({ title: "Video generated!", description: `${scenes.length} scenes created.` });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Generation failed";
       setStatus("idle");
       setStreamingCode("");
+      setStreamingChat("");
+      setWorkflowStep("");
+      setWorkflowDetail("");
       addMessage("assistant", `Error: ${msg}. Try a simpler prompt or re-download the model in Settings.`);
       toast({ title: "Error", description: msg, variant: "destructive" });
     }
-  }, [prompt, messages, activeScene, project.globalSettings.fps, ensureModel, addMessage, addScene, toast]);
+  }, [prompt, messages, project.globalSettings, ensureModel, addMessage, addScene, addFileForScene, toast]);
 
   const handleSuggestionClick = useCallback((suggestion: string) => {
     setPrompt(suggestion);
@@ -178,30 +214,40 @@ const Index = () => {
   }, [activeScene, toast]);
 
   const handleNewProject = useCallback((w: number, h: number) => {
+    const sceneId = crypto.randomUUID();
+    const defaultCode = `var frame = useCurrentFrame();\nvar config = useVideoConfig();\nreturn React.createElement("div", {\n  style: { width: config.width, height: config.height, background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center" }\n}, React.createElement("div", {\n  style: { color: "#e0e0ff", fontSize: 32, fontFamily: "system-ui" }\n}, "New Project"));`;
+
     const newProject: VideoProject = {
       id: crypto.randomUUID(),
       name: "Untitled",
       createdAt: Date.now(),
       scenes: [{
-        id: crypto.randomUUID(),
+        id: sceneId,
         name: "Scene 1",
         width: w,
         height: h,
         fps: 30,
         durationInFrames: 150,
-        componentCode: `var frame = useCurrentFrame();\nvar config = useVideoConfig();\nreturn React.createElement("div", {\n  style: { width: config.width, height: config.height, background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center" }\n}, React.createElement("div", {\n  style: { color: "#e0e0ff", fontSize: 32, fontFamily: "system-ui" }\n}, "New Project"));`,
+        componentCode: defaultCode,
+      }],
+      files: [{
+        id: crypto.randomUUID(),
+        path: "scenes/scene-1.jsx",
+        content: defaultCode,
+        sceneId,
+        type: "scene",
       }],
       activeSceneIndex: 0,
       globalSettings: { width: w, height: h, fps: 30 },
     };
     replaceProject(newProject);
+    setProjectFiles(newProject.files);
     setPrompt("");
     setMessages([]);
     toast({ title: "New project", description: `Created ${w}×${h} composition.` });
   }, [replaceProject, toast]);
 
   const handleLoadProject = useCallback((p: SavedProject) => {
-    // Legacy support: wrap old scenes in project format
     const scene = p.scene as RemotionScene;
     if (!scene.id) scene.id = crypto.randomUUID();
     if (!scene.name) scene.name = p.name;
@@ -210,10 +256,18 @@ const Index = () => {
       name: p.name,
       createdAt: p.createdAt,
       scenes: [scene],
+      files: [{
+        id: crypto.randomUUID(),
+        path: `scenes/${slugify(scene.name)}.jsx`,
+        content: scene.componentCode,
+        sceneId: scene.id,
+        type: "scene",
+      }],
       activeSceneIndex: 0,
       globalSettings: { width: scene.width, height: scene.height, fps: scene.fps },
     };
     replaceProject(proj);
+    setProjectFiles(proj.files);
     setActiveTab("chat");
     toast({ title: "Project loaded", description: p.name });
   }, [replaceProject, toast]);
@@ -234,25 +288,8 @@ const Index = () => {
     setActiveTab(tab);
   }, []);
 
-  const handleGenerateVoiceover = useCallback(async (text: string) => {
-    try {
-      setStatus("generating-voice");
-      const tts = await import("@/lib/tts");
-      const audioUrl = await tts.generateVoiceover(text, (pct, msg) => {
-        setModelProgressText(`TTS: ${msg} (${pct}%)`);
-      });
-      updateActiveScene({ voiceover: { text, audioUrl } });
-      setStatus("idle");
-      toast({ title: "Voiceover generated!", description: "Audio attached to active scene." });
-    } catch (err) {
-      setStatus("idle");
-      const msg = err instanceof Error ? err.message : "TTS failed";
-      toast({ title: "Voiceover error", description: msg, variant: "destructive" });
-    }
-  }, [updateActiveScene, toast]);
-
   const isExporting = status === "exporting";
-  const isGenerating = status === "generating";
+  const isGenerating = status === "generating" || status === "scripting" || status === "generating-audio" || status === "generating-visuals";
 
   const renderSidePanel = () => {
     switch (activeTab) {
@@ -265,28 +302,15 @@ const Index = () => {
             status={status}
             modelProgress={modelProgress}
             modelProgressText={modelProgressText}
-            streamingCode={streamingCode}
+            streamingChat={streamingChat}
+            workflowStep={workflowStep}
+            workflowDetail={workflowDetail}
             messages={messages}
             onSuggestionClick={handleSuggestionClick}
           />
         );
       case "projects":
         return <ProjectsPanel projects={projects} onLoad={handleLoadProject} onDelete={handleDeleteProject} />;
-      case "media":
-        return (
-          <div className="w-72 bg-card border-r border-border flex flex-col shrink-0">
-            <div className="p-3 border-b border-border">
-              <h2 className="font-semibold text-sm">Composition</h2>
-            </div>
-            <div className="p-3 space-y-2 text-xs text-muted-foreground">
-              <div className="flex justify-between"><span>Dimensions</span><span className="font-mono text-foreground">{activeScene.width}×{activeScene.height}</span></div>
-              <div className="flex justify-between"><span>FPS</span><span className="font-mono text-foreground">{activeScene.fps}</span></div>
-              <div className="flex justify-between"><span>Duration</span><span className="font-mono text-foreground">{(activeScene.durationInFrames / activeScene.fps).toFixed(1)}s</span></div>
-              <div className="flex justify-between"><span>Frames</span><span className="font-mono text-foreground">{activeScene.durationInFrames}</span></div>
-              <div className="flex justify-between"><span>Scenes</span><span className="font-mono text-foreground">{project.scenes.length}</span></div>
-            </div>
-          </div>
-        );
       case "code":
         return (
           <div className="w-72 bg-card border-r border-border flex flex-col shrink-0 overflow-hidden">
@@ -337,13 +361,10 @@ const Index = () => {
           sceneName={activeScene.name}
           sceneIndex={project.activeSceneIndex}
           totalScenes={project.scenes.length}
+          files={projectFiles}
           onUpdateCode={(code) => updateActiveScene({ componentCode: code })}
-          onUpdateDuration={(d) => updateActiveScene({ durationInFrames: d })}
-          onUpdateFps={(fps) => updateActiveScene({ fps })}
           onDeleteScene={() => removeScene(project.activeSceneIndex)}
           onDuplicateScene={() => duplicateScene(project.activeSceneIndex)}
-          onGenerateVoiceover={handleGenerateVoiceover}
-          voiceover={activeScene.voiceover}
           streamingCode={streamingCode}
           isGenerating={isGenerating}
         />

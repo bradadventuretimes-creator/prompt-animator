@@ -1,132 +1,138 @@
 
 
-# Integrate Remotion into JavaMotion
+# Fix Errors, Add Live Code Streaming, and Clean Up Platform
 
-## What Changes
-Replace the custom Canvas renderer with **Remotion's `@remotion/player`** for in-browser preview and keep the existing `MediaRecorder` export as a browser-side fallback. The AI will generate **React component code** (JSX) that Remotion renders, enabling shapes, motion paths, and complex animations -- not just text.
+## Problems Identified
 
-## Why This Works Without a Backend
-Remotion's `@remotion/player` is a pure React component that renders animations in the browser. No Node.js server needed for preview. Export stays browser-side using canvas capture. Lovable Cloud is **not required** for this step.
+**1. "Render error: Unexpected token '<'"** -- The `remotion-renderer.tsx` uses `new Function()` which cannot parse JSX. The AI generates code containing JSX (`<div>`, `<h1>`, etc.) but `new Function()` only understands plain JavaScript. JSX needs to be transpiled to `React.createElement()` calls before execution.
 
----
+**2. "AI returned invalid JSON"** -- The small local model (Qwen2.5-Coder-1.5B) often fails to produce valid JSON with properly escaped code strings. The current parsing is brittle -- it tries `JSON.parse()` once and gives up.
 
-## Architecture Overview
+**3. No live code visibility** -- The AI generates everything in one shot, and the user only sees the result (or error) at the end. There's no streaming or progress feedback showing the code being written.
 
-```text
-User Prompt --> WebLLM AI --> React/JSX code string --> eval'd as Remotion Composition --> @remotion/player
-```
+**4. Cluttered UI** -- Multiple unused/legacy components (Timeline.tsx, PromptBar.tsx, ExportButton.tsx, StatusIndicator.tsx, NavLink.tsx, renderer.ts) and the sidebar has tabs (Templates, Timeline) that don't do anything useful.
 
-Instead of generating a JSON scene, the AI will generate a **React component string** that uses Remotion's `useCurrentFrame()` and `interpolate()` APIs. This component gets dynamically rendered inside `@remotion/player`.
+**5. App.css conflicts** -- `src/App.css` sets `max-width: 1280px` and `padding: 2rem` on `#root`, which constrains the full-screen editor layout.
 
----
+## To answer your question about React in the browser
 
-## Step-by-Step Plan
+Yes, Remotion's React code works entirely in the browser without Node.js. The `@remotion/player` package renders React components as animations directly in the DOM. The only limitation is video **export** (encoding to MP4) which normally needs a server -- but for preview and WebM capture, everything runs client-side.
 
-### 1. Install Remotion dependencies
-Add `remotion` and `@remotion/player` packages.
+## Plan
 
-### 2. Update Scene Types (`src/lib/scene-types.ts`)
-- Add a new `RemotionScene` type that stores: `componentCode` (string of React/JSX), `width`, `height`, `fps`, `durationInFrames`, and `metadata` (title, description).
-- Keep the old `Scene` type for backward compatibility with existing saved projects.
+### Step 1: Fix JSX Rendering (the "Unexpected token '<'" error)
 
-### 3. Create a Remotion Composition renderer (`src/lib/remotion-renderer.tsx`)
-- A function that takes a React component code string and safely evaluates it into a renderable React component.
-- Uses `new Function()` with Remotion's `useCurrentFrame`, `useVideoConfig`, `interpolate`, and `spring` passed as arguments -- so the AI-generated code can reference them.
-- Wraps execution in try/catch with a fallback error display.
+The core issue: `new Function()` cannot parse JSX syntax. Two fixes needed:
 
-### 4. Update AI prompt and generation (`src/lib/ai.ts`)
-- Change the system prompt to instruct the AI to generate React component code using Remotion APIs (`useCurrentFrame()`, `interpolate()`, `spring()`).
-- The AI output will be a JSON object: `{ code: "...", width, height, fps, durationInFrames }`.
-- Parse and validate the output, extracting the component code string.
+- **Change the AI system prompt** to instruct the model to output `React.createElement()` calls instead of JSX. This avoids needing a JSX transpiler entirely. The prompt will include clear examples using `React.createElement("div", { style: {...} }, children)` instead of `<div style={...}>`.
+- **Add a JSX-to-createElement fallback** in `remotion-renderer.tsx`: if the code contains `<` characters (indicating JSX), attempt a simple regex-based transform of common patterns before falling back to the error message. This catches cases where the AI still outputs JSX despite instructions.
 
-### 5. Replace VideoPreview (`src/components/VideoPreview.tsx`)
-- Replace the canvas-based player with `@remotion/player`'s `<Player>` component.
-- Pass the dynamically created Remotion composition as the `component` prop.
-- Wire up play/pause/seek controls to the Player's ref API.
-- Keep the progress bar and transport controls.
+### Step 2: Fix JSON Parsing (the "invalid JSON" error)
 
-### 6. Update the usePlayer hook (`src/hooks/use-player.ts`)
-- Adapt to work with Remotion's Player ref (`playerRef.current.play()`, `.pause()`, `.seekTo()`).
-- Remove Canvas-specific rendering logic.
+Make the AI output format more robust:
 
-### 7. Update exporter (`src/lib/exporter.ts`)
-- For now, keep using `MediaRecorder` + canvas capture by rendering the Player's iframe/DOM to a canvas.
-- Alternatively, use Remotion Player's built-in `renderToCanvas` if available, or capture via `html2canvas` approach.
+- **Use streaming** with WebLLM to accumulate tokens, then extract the code more reliably.
+- **Add multiple extraction strategies** in `ai.ts`: try JSON.parse first, then regex extraction of the `"code"` field, then treat the entire output as code if it contains `return` and `React.createElement`.
+- **Add auto-retry** (1 retry with a slightly rephrased prompt) before showing the error to the user.
 
-### 8. Update EditingPanel (`src/components/EditingPanel.tsx`)
-- Show the generated code in an editable text area so users can tweak it.
-- Add basic property controls (width, height, fps, duration, background color) that modify the composition wrapper.
-- Keep element-level sliders for when the scene uses the legacy JSON format.
+### Step 3: Add Live Code Streaming
 
-### 9. Update CodePanel (`src/components/CodePanel.tsx`)
-- Display the actual React/JSX code the AI generated (instead of JSON).
-- Add copy-to-clipboard functionality.
+Switch `generateScene()` to use WebLLM's streaming API (`stream: true`):
 
-### 10. Update MediaPanel, TimelinePanel
-- MediaPanel: Show composition metadata (dimensions, fps, duration, element count parsed from code).
-- TimelinePanel: Show a single composition track with the playhead synced to the Remotion Player's current frame.
+- As tokens arrive, accumulate and display them in real-time in the code panel.
+- Add a new `generateSceneStreaming()` function that accepts an `onToken(partialCode: string)` callback.
+- The `Index.tsx` will pass this callback to update a `streamingCode` state, which the CodePanel/EditingPanel will display live.
+- The code panel will auto-scroll to follow new tokens during generation.
 
-### 11. Fix the current UI bug
-- Fix the error visible in the screenshot (likely related to the current canvas/player initialization).
+### Step 4: Clean Up UI and Remove Dead Code
+
+**Delete unused files:**
+- `src/components/Timeline.tsx` (legacy canvas-based timeline, replaced by TimelinePanel)
+- `src/components/PromptBar.tsx` (replaced by ChatPanel's built-in prompt area)
+- `src/components/ExportButton.tsx` (replaced by header Download button)
+- `src/components/StatusIndicator.tsx` (status shown inline in ChatPanel)
+- `src/components/NavLink.tsx` (unused)
+- `src/lib/renderer.ts` (legacy canvas renderer, replaced by Remotion)
+
+**Clean up App.css:**
+- Remove the `#root` max-width/padding rules that conflict with the full-screen layout.
+
+**Simplify SidebarNav:**
+- Remove "Timeline" tab (timeline is always visible at the bottom)
+- Remove "Templates" tab (not implemented)
+- Keep: New, Projects, Chat, Media, Code
+
+**Simplify EditingPanel:**
+- Merge Properties panel into a cleaner layout: composition info at top, live code editor below.
+- Remove the separate CodePanel sidebar -- instead, the code is always visible in the right panel's code editor section.
+
+### Step 5: Improve AI Prompt Quality
+
+Rewrite the system prompt to:
+- Use `React.createElement()` exclusively (no JSX)
+- Provide 3 diverse examples (text animation, shape motion, multi-element scene)
+- Be more explicit about the JSON format constraints
+- Add negative examples ("DO NOT use JSX syntax like <div>")
 
 ---
 
 ## Technical Details
 
-### Remotion Component Evaluation
-The AI generates code like:
+### Streaming API usage (ai.ts)
 ```text
-const { useCurrentFrame, interpolate, spring, useVideoConfig } = Remotion;
+const chunks = await engine.chat.completions.create({
+  messages: [...],
+  stream: true,
+  temperature: 0.3,
+  max_tokens: 3000,
+});
 
-const frame = useCurrentFrame();
-const { fps } = useVideoConfig();
-
-const ballY = interpolate(
-  Math.sin(frame * 0.1) * 30,
-  [-30, 30], [200, 400]
-);
-
-return (
-  <div style={{ flex: 1, background: '#1a1a2e' }}>
-    <div style={{
-      width: 50, height: 50, borderRadius: '50%',
-      background: 'red',
-      position: 'absolute',
-      left: interpolate(frame, [0, 90], [100, 600]),
-      top: ballY,
-    }} />
-  </div>
-);
+let accumulated = "";
+for await (const chunk of chunks) {
+  accumulated += chunk.choices[0]?.delta?.content || "";
+  onToken(accumulated);
+}
 ```
 
-This gets wrapped in a function component and passed to `<Player component={DynamicComp} />`.
+### JSX-free code example (what AI will generate)
+```text
+const frame = useCurrentFrame();
+const opacity = interpolate(frame, [0, 30], [0, 1], { extrapolateRight: "clamp" });
+return React.createElement("div", {
+  style: { width: 1280, height: 720, background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center" }
+}, React.createElement("div", {
+  style: { fontSize: 48, color: "white", opacity }
+}, "Hello World"));
+```
 
-### What the AI Can Now Generate
-- Bouncing balls, spinning shapes, particle effects
-- Multi-element scenes with staggered animations
-- CSS-based gradients, shadows, transforms
-- SVG shapes and paths
-- Any React-renderable content
+### Robust JSON extraction (ai.ts)
+```text
+1. Try JSON.parse(content)
+2. Try extracting JSON from markdown fences
+3. Try regex: match /"code"\s*:\s*"([\s\S]*?)"\s*,/ and extract fields
+4. If content contains "return" and "React.createElement", treat entire content as code with default dimensions
+```
 
-### Export Strategy
-Browser-side export using the existing `MediaRecorder` approach, capturing the Player's rendered output. This produces `.webm` files. Full MP4 rendering would require a backend (future Lovable Cloud integration).
-
-### Files Modified
-| File | Action |
+### Files to Modify
+| File | Change |
 |------|--------|
-| `package.json` | Add `remotion`, `@remotion/player` |
-| `src/lib/scene-types.ts` | Add `RemotionScene` type |
-| `src/lib/remotion-renderer.tsx` | New -- dynamic component evaluator |
-| `src/lib/ai.ts` | New system prompt for React/JSX output |
-| `src/lib/renderer.ts` | Keep for legacy, add deprecation note |
-| `src/lib/scene-validation.ts` | Add Remotion scene validation |
-| `src/components/VideoPreview.tsx` | Replace canvas with `<Player>` |
-| `src/hooks/use-player.ts` | Adapt to Remotion Player ref |
-| `src/lib/exporter.ts` | Adapt capture for Remotion output |
-| `src/components/EditingPanel.tsx` | Add code editor, adapt controls |
-| `src/components/CodePanel.tsx` | Show JSX instead of JSON |
-| `src/components/MediaPanel.tsx` | Show composition metadata |
-| `src/components/TimelinePanel.tsx` | Sync with Remotion player |
-| `src/lib/default-scene.ts` | Update default to Remotion format |
-| `src/pages/Index.tsx` | Wire up new types and flow |
+| `src/lib/ai.ts` | Streaming API, new prompt with React.createElement, robust parsing |
+| `src/lib/remotion-renderer.tsx` | JSX fallback detection |
+| `src/pages/Index.tsx` | Add streamingCode state, pass to panels, clean up |
+| `src/components/SidebarNav.tsx` | Remove Timeline/Templates tabs |
+| `src/components/EditingPanel.tsx` | Merge code view, show streaming code |
+| `src/components/ChatPanel.tsx` | Show streaming progress with live token count |
+| `src/App.css` | Remove conflicting #root styles |
+
+### Files to Delete
+| File | Reason |
+|------|--------|
+| `src/components/Timeline.tsx` | Legacy, replaced by TimelinePanel |
+| `src/components/PromptBar.tsx` | Replaced by ChatPanel |
+| `src/components/ExportButton.tsx` | Replaced by header button |
+| `src/components/StatusIndicator.tsx` | Unused |
+| `src/components/NavLink.tsx` | Unused |
+| `src/lib/renderer.ts` | Legacy canvas renderer |
+| `src/components/CodePanel.tsx` | Merged into EditingPanel |
+| `src/components/MediaPanel.tsx` | Merged into EditingPanel as composition info |
 

@@ -68,5 +68,13 @@ export function usePlayer(scene: Scene | null) {
     setCurrentFrame(0);
   }, [scene, pause]);
 
-  return { canvasRef, playing, currentFrame, togglePlay, reset, draw };
+  const seek = useCallback((frame: number) => {
+    if (!scene) return;
+    const clamped = Math.max(0, Math.min(frame, scene.duration - 1));
+    frameRef.current = clamped;
+    setCurrentFrame(clamped);
+    draw(clamped);
+  }, [scene, draw]);
+
+  return { canvasRef, playing, currentFrame, togglePlay, reset, seek, draw };
 }

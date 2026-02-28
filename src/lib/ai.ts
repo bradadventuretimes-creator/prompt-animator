@@ -39,7 +39,7 @@ export async function loadModel(
     const pct = Math.round(report.progress * 100);
     onProgress(pct, report.text);
   });
-  await engine.reload("Qwen2.5-7B-Instruct-q4f16_1-MLC");
+  await engine.reload("Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC");
 }
 
 export async function generateScene(prompt: string): Promise<Scene> {

@@ -17,6 +17,7 @@ export interface SceneElement {
   animation: ElementAnimation;
 }
 
+/** Legacy canvas-based scene */
 export interface Scene {
   width: number;
   height: number;
@@ -24,6 +25,19 @@ export interface Scene {
   duration: number;
   background: string;
   elements: SceneElement[];
+}
+
+/** New Remotion-based scene */
+export interface RemotionScene {
+  componentCode: string;
+  width: number;
+  height: number;
+  fps: number;
+  durationInFrames: number;
+  metadata?: {
+    title?: string;
+    description?: string;
+  };
 }
 
 export type AppStatus = "idle" | "loading-model" | "generating" | "rendering" | "exporting";

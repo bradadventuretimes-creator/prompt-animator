@@ -1,42 +1,28 @@
 import { useState, useCallback } from "react";
-import type { Scene, SceneElement, AnimationType } from "@/lib/scene-types";
+import type { RemotionScene } from "@/lib/scene-types";
 
-export function useSceneEditor(initialScene: Scene) {
-  const [scene, setScene] = useState<Scene>(initialScene);
+export function useSceneEditor(initialScene: RemotionScene) {
+  const [scene, setScene] = useState<RemotionScene>(initialScene);
 
-  const updateBackground = useCallback((color: string) => {
-    setScene((s) => ({ ...s, background: color }));
+  const updateCode = useCallback((code: string) => {
+    setScene((s) => ({ ...s, componentCode: code }));
   }, []);
 
-  const updateElement = useCallback((index: number, updates: Partial<SceneElement>) => {
-    setScene((s) => {
-      const elements = [...s.elements];
-      elements[index] = { ...elements[index], ...updates };
-      return { ...s, elements };
-    });
+  const updateDimensions = useCallback((width: number, height: number) => {
+    setScene((s) => ({ ...s, width, height }));
   }, []);
 
-  const updateElementAnimation = useCallback(
-    (index: number, updates: Partial<SceneElement["animation"]>) => {
-      setScene((s) => {
-        const elements = [...s.elements];
-        elements[index] = {
-          ...elements[index],
-          animation: { ...elements[index].animation, ...updates },
-        };
-        return { ...s, elements };
-      });
-    },
-    []
-  );
-
-  const updateDuration = useCallback((duration: number) => {
-    setScene((s) => ({ ...s, duration }));
+  const updateFps = useCallback((fps: number) => {
+    setScene((s) => ({ ...s, fps }));
   }, []);
 
-  const replaceScene = useCallback((newScene: Scene) => {
+  const updateDuration = useCallback((durationInFrames: number) => {
+    setScene((s) => ({ ...s, durationInFrames }));
+  }, []);
+
+  const replaceScene = useCallback((newScene: RemotionScene) => {
     setScene(newScene);
   }, []);
 
-  return { scene, updateBackground, updateElement, updateElementAnimation, updateDuration, replaceScene };
+  return { scene, updateCode, updateDimensions, updateFps, updateDuration, replaceScene };
 }

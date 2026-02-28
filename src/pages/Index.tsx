@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from "react";
-import { DEFAULT_SCENE } from "@/lib/default-scene";
+import { useState, useCallback, useRef } from "react";
+import { DEFAULT_REMOTION_SCENE } from "@/lib/default-scene";
 import { useSceneEditor } from "@/hooks/use-scene-editor";
 import { exportVideo } from "@/lib/exporter";
-import type { AppStatus, Scene } from "@/lib/scene-types";
+import type { AppStatus, RemotionScene } from "@/lib/scene-types";
 import { SidebarNav } from "@/components/SidebarNav";
 import { ChatPanel } from "@/components/ChatPanel";
 import { VideoPreview } from "@/components/VideoPreview";
@@ -35,7 +35,6 @@ const Index = () => {
   const [modelProgressText, setModelProgressText] = useState("");
   const [exportProgress, setExportProgress] = useState(0);
   const [activeTab, setActiveTab] = useState("chat");
-  const [selectedElement, setSelectedElement] = useState(0);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [projects, setProjects] = useState<SavedProject[]>(loadProjects);
@@ -46,14 +45,13 @@ const Index = () => {
 
   const {
     scene,
-    updateBackground,
-    updateElement,
-    updateElementAnimation,
+    updateCode,
     updateDuration,
+    updateFps,
+    updateDimensions,
     replaceScene,
-  } = useSceneEditor(DEFAULT_SCENE);
+  } = useSceneEditor(DEFAULT_REMOTION_SCENE);
 
-  // Auto-save project when scene changes after generation
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) {
       toast({ title: "Enter a prompt", description: "Describe the animation you want to create." });
@@ -71,10 +69,8 @@ const Index = () => {
       setStatus("generating");
       const newScene = await ai.generateScene(prompt);
       replaceScene(newScene);
-      setSelectedElement(0);
       setStatus("idle");
 
-      // Auto-save as project
       const project: SavedProject = {
         id: crypto.randomUUID(),
         name: prompt.slice(0, 50),
@@ -110,23 +106,26 @@ const Index = () => {
   }, [scene, toast]);
 
   const handleNewProject = useCallback((w: number, h: number) => {
-    const blank: Scene = {
+    const blank: RemotionScene = {
       width: w,
       height: h,
       fps: 30,
-      duration: 150,
-      background: "#1a1a2e",
-      elements: [],
+      durationInFrames: 150,
+      componentCode: `const frame = useCurrentFrame();
+const { width, height } = useVideoConfig();
+return (
+  <div style={{ width, height, background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ color: "#e0e0ff", fontSize: 32, fontFamily: "system-ui" }}>New Project</div>
+  </div>
+);`,
     };
     replaceScene(blank);
     setPrompt("");
-    setSelectedElement(0);
-    toast({ title: "New project", description: `Created ${w}×${h} canvas.` });
+    toast({ title: "New project", description: `Created ${w}×${h} composition.` });
   }, [replaceScene, toast]);
 
   const handleLoadProject = useCallback((p: SavedProject) => {
-    replaceScene(p.scene);
-    setSelectedElement(0);
+    replaceScene(p.scene as RemotionScene);
     setActiveTab("chat");
     toast({ title: "Project loaded", description: p.name });
   }, [replaceScene, toast]);
@@ -188,12 +187,10 @@ const Index = () => {
 
         <EditingPanel
           scene={scene}
-          selectedElement={selectedElement}
-          onSelectElement={setSelectedElement}
-          onUpdateBackground={updateBackground}
-          onUpdateElement={updateElement}
-          onUpdateElementAnimation={updateElementAnimation}
+          onUpdateCode={updateCode}
           onUpdateDuration={updateDuration}
+          onUpdateFps={updateFps}
+          onUpdateDimensions={updateDimensions}
         />
       </div>
 

@@ -1,4 +1,4 @@
-import type { Scene, SceneElement, AnimationType } from "./scene-types";
+import type { Scene, SceneElement, AnimationType, RemotionScene } from "./scene-types";
 
 const VALID_ANIMATIONS: AnimationType[] = ["typing", "fadeIn", "scaleIn", "none"];
 
@@ -38,6 +38,7 @@ function validateElement(el: unknown): SceneElement | null {
   };
 }
 
+/** Validate legacy canvas scene */
 export function validateScene(raw: unknown): Scene | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -58,5 +59,26 @@ export function validateScene(raw: unknown): Scene | null {
     duration: clamp(Number(r.duration) || 180, 1, 18000),
     background: isValidColor(String(r.background || "")) ? String(r.background) : "#1a1a2e",
     elements,
+  };
+}
+
+/** Validate Remotion scene from AI output */
+export function validateRemotionScene(raw: unknown): RemotionScene | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+
+  const code = typeof r.code === "string" ? r.code : typeof r.componentCode === "string" ? r.componentCode : null;
+  if (!code || code.trim().length < 10) return null;
+
+  return {
+    componentCode: code,
+    width: clamp(Number(r.width) || 1280, 320, 3840),
+    height: clamp(Number(r.height) || 720, 240, 2160),
+    fps: clamp(Number(r.fps) || 30, 1, 120),
+    durationInFrames: clamp(Number(r.durationInFrames) || Number(r.duration) || 180, 1, 18000),
+    metadata: {
+      title: sanitizeString((r.metadata as Record<string, unknown>)?.title) || undefined,
+      description: sanitizeString((r.metadata as Record<string, unknown>)?.description) || undefined,
+    },
   };
 }

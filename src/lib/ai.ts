@@ -1,34 +1,45 @@
 import * as webllm from "@mlc-ai/web-llm";
-import { validateScene } from "./scene-validation";
-import type { Scene } from "./scene-types";
+import { validateRemotionScene } from "./scene-validation";
+import type { RemotionScene } from "./scene-types";
 
 let engine: webllm.MLCEngine | null = null;
 
-const SYSTEM_PROMPT = `You are a motion graphics scene generator. You MUST output ONLY valid JSON matching this exact schema, with NO markdown, NO explanations, NO code blocks:
+const SYSTEM_PROMPT = `You are a motion graphics generator that outputs React component code for Remotion.
+You MUST output ONLY valid JSON with NO markdown, NO explanations, NO code blocks.
+
+Output this exact JSON structure:
 {
-  "width": number (1280),
-  "height": number (720),
-  "fps": number (30),
-  "duration": number (total frames),
-  "background": string (hex color),
-  "elements": [
-    {
-      "type": "text",
-      "text": string,
-      "x": number (pixel position),
-      "y": number (pixel position),
-      "fontSize": number,
-      "color": string (hex color),
-      "animation": {
-        "type": "typing" | "fadeIn" | "scaleIn" | "none",
-        "startFrame": number,
-        "speed": number (frames per character for typing, 1 otherwise),
-        "duration": number (frames for the animation)
-      }
-    }
-  ]
+  "code": "...component body code...",
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "durationInFrames": 180
 }
-Output ONLY the JSON object. x,y coordinates are centered (text is drawn centered). Keep animations simple.`;
+
+The "code" field contains the BODY of a React function component. These variables are available:
+- useCurrentFrame() - returns current frame number
+- useVideoConfig() - returns { fps, width, height, durationInFrames }
+- interpolate(value, inputRange, outputRange, options?) - maps values between ranges. Options: { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+- spring({ frame, fps, config? }) - spring animation. Config: { damping, stiffness, mass }
+- Easing - easing functions (Easing.bezier, Easing.ease, etc.)
+- React - for React.createElement if needed
+
+The code must end with a return statement returning JSX using inline styles.
+Use <div> elements with position: absolute for shapes. Use CSS transforms for animation.
+Keep durationInFrames reasonable (90-300 frames at 30fps = 3-10 seconds).
+
+Example code value:
+const frame = useCurrentFrame();
+const { fps, width, height } = useVideoConfig();
+const opacity = interpolate(frame, [0, 30], [0, 1], { extrapolateRight: "clamp" });
+const scale = spring({ frame, fps, config: { damping: 12 } });
+return (
+  <div style={{ width, height, background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ fontSize: 48, color: "white", opacity, transform: \`scale(\${scale})\` }}>Hello World</div>
+  </div>
+);
+
+IMPORTANT: Output ONLY the JSON object. The code field is a string, properly escaped.`;
 
 export async function loadModel(
   onProgress: (progress: number, text: string) => void
@@ -42,7 +53,7 @@ export async function loadModel(
   await engine.reload("Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC");
 }
 
-export async function generateScene(prompt: string): Promise<Scene> {
+export async function generateScene(prompt: string): Promise<RemotionScene> {
   if (!engine) throw new Error("Model not loaded");
 
   const reply = await engine.chat.completions.create({
@@ -51,7 +62,7 @@ export async function generateScene(prompt: string): Promise<Scene> {
       { role: "user", content: prompt },
     ],
     temperature: 0.3,
-    max_tokens: 2048,
+    max_tokens: 3000,
   });
 
   const content = reply.choices[0]?.message?.content || "";
@@ -67,7 +78,7 @@ export async function generateScene(prompt: string): Promise<Scene> {
     throw new Error("AI returned invalid JSON. Please try rephrasing your prompt.");
   }
 
-  const scene = validateScene(parsed);
+  const scene = validateRemotionScene(parsed);
   if (!scene) {
     throw new Error("AI output did not match the expected scene format. Please try again.");
   }

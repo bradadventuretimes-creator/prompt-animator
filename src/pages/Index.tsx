@@ -8,13 +8,11 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { VideoPreview } from "@/components/VideoPreview";
 import { EditingPanel } from "@/components/EditingPanel";
 import { TimelinePanel } from "@/components/TimelinePanel";
-import { MediaPanel } from "@/components/MediaPanel";
-import { CodePanel } from "@/components/CodePanel";
 import { ProjectsPanel, type SavedProject } from "@/components/ProjectsPanel";
 import { NewProjectDialog } from "@/components/NewProjectDialog";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Download, Loader2, Share2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 
 const STORAGE_KEY = "javamotion_projects";
 
@@ -39,6 +37,7 @@ const Index = () => {
   const [playing, setPlaying] = useState(false);
   const [projects, setProjects] = useState<SavedProject[]>(loadProjects);
   const [showNewDialog, setShowNewDialog] = useState(false);
+  const [streamingCode, setStreamingCode] = useState("");
   const { toast } = useToast();
 
   const playerRef = useRef<{ seek: (f: number) => void; togglePlay: () => void; reset: () => void } | null>(null);
@@ -67,8 +66,14 @@ const Index = () => {
         });
       }
       setStatus("generating");
-      const newScene = await ai.generateScene(prompt);
+      setStreamingCode("");
+
+      const newScene = await ai.generateSceneStreaming(prompt, (accumulated) => {
+        setStreamingCode(accumulated);
+      });
+
       replaceScene(newScene);
+      setStreamingCode("");
       setStatus("idle");
 
       const project: SavedProject = {
@@ -83,10 +88,11 @@ const Index = () => {
         return next;
       });
 
-      toast({ title: "Scene generated!", description: "Your animation is ready to preview." });
+      toast({ title: "Scene generated!", description: "Your animation is ready." });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Generation failed";
       setStatus("idle");
+      setStreamingCode("");
       toast({ title: "Error", description: msg, variant: "destructive" });
     }
   }, [prompt, replaceScene, toast]);
@@ -111,13 +117,7 @@ const Index = () => {
       height: h,
       fps: 30,
       durationInFrames: 150,
-      componentCode: `const frame = useCurrentFrame();
-const { width, height } = useVideoConfig();
-return (
-  <div style={{ width, height, background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center" }}>
-    <div style={{ color: "#e0e0ff", fontSize: 32, fontFamily: "system-ui" }}>New Project</div>
-  </div>
-);`,
+      componentCode: `var frame = useCurrentFrame();\nvar config = useVideoConfig();\nreturn React.createElement("div", {\n  style: { width: config.width, height: config.height, background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center" }\n}, React.createElement("div", {\n  style: { color: "#e0e0ff", fontSize: 32, fontFamily: "system-ui" }\n}, "New Project"));`,
     };
     replaceScene(blank);
     setPrompt("");
@@ -147,36 +147,77 @@ return (
   }, []);
 
   const isExporting = status === "exporting";
+  const isGenerating = status === "generating";
+
+  // Show media info when "media" tab is active — inline in sidebar panel
+  const renderSidePanel = () => {
+    switch (activeTab) {
+      case "chat":
+        return (
+          <ChatPanel
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            onGenerate={handleGenerate}
+            status={status}
+            modelProgress={modelProgress}
+            modelProgressText={modelProgressText}
+            streamingCode={streamingCode}
+          />
+        );
+      case "projects":
+        return <ProjectsPanel projects={projects} onLoad={handleLoadProject} onDelete={handleDeleteProject} />;
+      case "media":
+        return (
+          <div className="w-72 bg-card border-r border-border flex flex-col shrink-0">
+            <div className="p-3 border-b border-border">
+              <h2 className="font-semibold text-sm">Composition</h2>
+            </div>
+            <div className="p-3 space-y-2 text-xs text-muted-foreground">
+              <div className="flex justify-between"><span>Dimensions</span><span className="font-mono text-foreground">{scene.width}×{scene.height}</span></div>
+              <div className="flex justify-between"><span>FPS</span><span className="font-mono text-foreground">{scene.fps}</span></div>
+              <div className="flex justify-between"><span>Duration</span><span className="font-mono text-foreground">{(scene.durationInFrames / scene.fps).toFixed(1)}s</span></div>
+              <div className="flex justify-between"><span>Frames</span><span className="font-mono text-foreground">{scene.durationInFrames}</span></div>
+              {scene.metadata?.title && <div className="flex justify-between"><span>Title</span><span className="text-foreground">{scene.metadata.title}</span></div>}
+            </div>
+          </div>
+        );
+      case "code":
+        return (
+          <div className="w-72 bg-card border-r border-border flex flex-col shrink-0 overflow-hidden">
+            <div className="p-3 border-b border-border flex items-center justify-between">
+              <h2 className="font-semibold text-sm">Code</h2>
+              <button
+                onClick={() => navigator.clipboard.writeText(scene.componentCode)}
+                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Copy
+              </button>
+            </div>
+            <pre className="flex-1 p-3 text-[10px] font-mono text-foreground overflow-auto leading-relaxed whitespace-pre-wrap">
+              {isGenerating && streamingCode ? streamingCode : scene.componentCode}
+            </pre>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
-      <header className="h-12 border-b border-border px-4 flex items-center justify-between shrink-0">
-        <h1 className="text-lg font-bold tracking-tight">
+      <header className="h-11 border-b border-border px-4 flex items-center justify-between shrink-0">
+        <h1 className="text-sm font-bold tracking-tight">
           <span className="text-primary">Java</span>Motion
         </h1>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="gap-1.5 text-xs">
-            <Share2 className="h-3.5 w-3.5" />
-            Share
-          </Button>
-          <Button size="sm" onClick={handleExport} disabled={isExporting} className="gap-1.5 text-xs">
-            {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            {isExporting ? `${exportProgress}%` : "Download"}
-          </Button>
-        </div>
+        <Button size="sm" onClick={handleExport} disabled={isExporting} className="gap-1.5 text-xs h-7">
+          {isExporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+          {isExporting ? `${exportProgress}%` : "Export"}
+        </Button>
       </header>
 
       <div className="flex-1 flex overflow-hidden">
         <SidebarNav activeTab={activeTab} onTabChange={handleTabChange} />
-
-        {activeTab === "chat" && (
-          <ChatPanel prompt={prompt} onPromptChange={setPrompt} onGenerate={handleGenerate} status={status} modelProgress={modelProgress} modelProgressText={modelProgressText} />
-        )}
-        {activeTab === "media" && <MediaPanel scene={scene} />}
-        {activeTab === "code" && <CodePanel scene={scene} />}
-        {activeTab === "projects" && (
-          <ProjectsPanel projects={projects} onLoad={handleLoadProject} onDelete={handleDeleteProject} />
-        )}
+        {renderSidePanel()}
 
         <VideoPreview
           scene={scene}
@@ -191,6 +232,8 @@ return (
           onUpdateDuration={updateDuration}
           onUpdateFps={updateFps}
           onUpdateDimensions={updateDimensions}
+          streamingCode={streamingCode}
+          isGenerating={isGenerating}
         />
       </div>
 

@@ -16,7 +16,7 @@ CRITICAL RULES:
 - The code MUST end with a return statement returning React.createElement(...)
 - Output ONLY the JSON object. No markdown, no backticks, no explanation.
 - Properly escape all strings inside JSON (use \\n for newlines, \\" for quotes).
-- USE THE FULL DURATION. Animate across ALL frames. If the user wants 20 seconds at 30fps, that's 600 frames — spread your animations across ALL 600 frames, not just the first 90.
+- USE THE FULL DURATION. Animate across ALL frames.
 - Create multiple stages/phases of animation that span the entire duration.
 - The "voiceoverText" field should contain narration text suitable for the video if appropriate.
 
@@ -27,8 +27,27 @@ AVAILABLE APIs:
 - spring({ frame, fps, config? }) spring animation. Config: { damping, stiffness, mass }
 - React.createElement(type, props, ...children)
 
-EXAMPLE - Multi-phase animation across full duration:
-{"code":"var frame = useCurrentFrame();\\nvar config = useVideoConfig();\\nvar dur = config.durationInFrames;\\nvar phase1 = interpolate(frame, [0, dur*0.2], [0, 1], { extrapolateRight: \\"clamp\\" });\\nvar phase2 = interpolate(frame, [dur*0.3, dur*0.5], [0, 1], { extrapolateRight: \\"clamp\\" });\\nvar phase3 = interpolate(frame, [dur*0.6, dur*0.8], [0, 1], { extrapolateRight: \\"clamp\\" });\\nreturn React.createElement(\\"div\\", { style: { width: config.width, height: config.height, background: \\"#1a1a2e\\", display: \\"flex\\", flexDirection: \\"column\\", alignItems: \\"center\\", justifyContent: \\"center\\" } }, React.createElement(\\"div\\", { style: { fontSize: 48, color: \\"white\\", opacity: phase1 } }, \\"Title\\"), React.createElement(\\"div\\", { style: { fontSize: 24, color: \\"#aaa\\", opacity: phase2, marginTop: 20 } }, \\"Subtitle\\"), React.createElement(\\"div\\", { style: { fontSize: 18, color: \\"#888\\", opacity: phase3, marginTop: 40 } }, \\"Call to Action\\"));","width":1280,"height":720,"fps":30,"durationInFrames":300,"voiceoverText":"Welcome to our product. Here is what makes it great. Try it today."}
+DESIGN PRINCIPLES — CREATE RICH MOTION GRAPHICS:
+- Use geometric shapes (circles, rectangles, lines) as visual elements using div with borderRadius, gradients
+- Layer multiple elements: background layer, midground shapes, foreground text
+- Use advanced animations: spring-based entrances, parallax movement, scaling, rotation via CSS transform
+- Use linear-gradient and radial-gradient backgrounds for visual depth
+- Create logo-like elements using styled divs (circles with initials, abstract shapes)
+- Animate position, scale, rotation, and opacity TOGETHER for richness
+- Use spring() for natural-feeling entrances, interpolate for smooth transitions
+- Spread animations across the ENTIRE duration in multiple phases
+
+HELPER FUNCTIONS — You can define reusable helpers before the return:
+  var makeCircle = function(x, y, size, color, delay) {
+    var s = spring({ frame: frame - delay, fps: fps, config: { damping: 12 } });
+    return React.createElement("div", { style: { position: "absolute", left: x, top: y, width: size, height: size, borderRadius: "50%", background: color, transform: "scale(" + s + ")", opacity: s } });
+  };
+
+EXAMPLE 1 — Logo reveal with shapes:
+{"code":"var frame = useCurrentFrame();\\nvar config = useVideoConfig();\\nvar dur = config.durationInFrames;\\nvar logoScale = spring({ frame: frame, fps: config.fps, config: { damping: 10, stiffness: 80 } });\\nvar textOp = interpolate(frame, [dur*0.2, dur*0.35], [0, 1], { extrapolateLeft: \\"clamp\\", extrapolateRight: \\"clamp\\" });\\nvar lineW = interpolate(frame, [dur*0.3, dur*0.5], [0, 200], { extrapolateLeft: \\"clamp\\", extrapolateRight: \\"clamp\\" });\\nvar tagOp = interpolate(frame, [dur*0.5, dur*0.7], [0, 1], { extrapolateLeft: \\"clamp\\", extrapolateRight: \\"clamp\\" });\\nvar bgShift = interpolate(frame, [0, dur], [0, 30], { extrapolateRight: \\"clamp\\" });\\nreturn React.createElement(\\"div\\", { style: { width: config.width, height: config.height, background: \\"linear-gradient(135deg, #0f0c29, #302b63, #24243e)\\", display: \\"flex\\", flexDirection: \\"column\\", alignItems: \\"center\\", justifyContent: \\"center\\", position: \\"relative\\", overflow: \\"hidden\\" } }, React.createElement(\\"div\\", { style: { position: \\"absolute\\", top: -50 + bgShift, right: -50, width: 300, height: 300, borderRadius: \\"50%\\", background: \\"radial-gradient(circle, rgba(99,102,241,0.3), transparent)\\", filter: \\"blur(40px)\\" } }), React.createElement(\\"div\\", { style: { width: 100, height: 100, borderRadius: \\"50%\\", background: \\"linear-gradient(135deg, #6366f1, #8b5cf6)\\", display: \\"flex\\", alignItems: \\"center\\", justifyContent: \\"center\\", transform: \\"scale(\\" + logoScale + \\")\\", boxShadow: \\"0 20px 60px rgba(99,102,241,0.4)\\" } }, React.createElement(\\"div\\", { style: { fontSize: 40, fontWeight: \\"bold\\", color: \\"white\\" } }, \\"A\\")), React.createElement(\\"div\\", { style: { fontSize: 48, fontWeight: \\"bold\\", color: \\"white\\", marginTop: 30, opacity: textOp } }, \\"Acme Studio\\"), React.createElement(\\"div\\", { style: { width: lineW, height: 3, background: \\"linear-gradient(90deg, transparent, #6366f1, transparent)\\", marginTop: 15 } }), React.createElement(\\"div\\", { style: { fontSize: 20, color: \\"rgba(255,255,255,0.7)\\", marginTop: 20, opacity: tagOp, letterSpacing: 4 } }, \\"DESIGN · BUILD · SHIP\\"));","width":1280,"height":720,"fps":30,"durationInFrames":180,"voiceoverText":"Introducing Acme Studio. Design, build, and ship with confidence."}
+
+EXAMPLE 2 — Info scene with shapes and data:
+{"code":"var frame = useCurrentFrame();\\nvar config = useVideoConfig();\\nvar dur = config.durationInFrames;\\nvar makeBar = function(x, h, color, delay) { var s = spring({ frame: frame - delay, fps: config.fps, config: { damping: 12 } }); return React.createElement(\\"div\\", { style: { position: \\"absolute\\", bottom: 200, left: x, width: 60, height: h * s, background: color, borderRadius: \\"8px 8px 0 0\\" } }); };\\nvar titleOp = interpolate(frame, [0, dur*0.15], [0, 1], { extrapolateLeft: \\"clamp\\", extrapolateRight: \\"clamp\\" });\\nvar statsOp = interpolate(frame, [dur*0.4, dur*0.55], [0, 1], { extrapolateLeft: \\"clamp\\", extrapolateRight: \\"clamp\\" });\\nvar ctaOp = interpolate(frame, [dur*0.7, dur*0.85], [0, 1], { extrapolateLeft: \\"clamp\\", extrapolateRight: \\"clamp\\" });\\nreturn React.createElement(\\"div\\", { style: { width: config.width, height: config.height, background: \\"linear-gradient(180deg, #1a1a2e, #16213e)\\", position: \\"relative\\", overflow: \\"hidden\\" } }, React.createElement(\\"div\\", { style: { position: \\"absolute\\", top: 60, left: 80, fontSize: 42, fontWeight: \\"bold\\", color: \\"white\\", opacity: titleOp } }, \\"Growth Metrics\\"), makeBar(200, 180, \\"#6366f1\\", 15), makeBar(300, 260, \\"#8b5cf6\\", 25), makeBar(400, 320, \\"#a78bfa\\", 35), makeBar(500, 220, \\"#c4b5fd\\", 45), React.createElement(\\"div\\", { style: { position: \\"absolute\\", bottom: 80, right: 100, fontSize: 64, fontWeight: \\"bold\\", color: \\"#6366f1\\", opacity: statsOp } }, \\"+127%\\"), React.createElement(\\"div\\", { style: { position: \\"absolute\\", bottom: 60, left: 80, fontSize: 22, color: \\"rgba(255,255,255,0.6)\\", opacity: ctaOp } }, \\"Year over year revenue growth\\"));","width":1280,"height":720,"fps":30,"durationInFrames":210,"voiceoverText":"Our growth metrics speak for themselves. Revenue is up 127 percent year over year."}
 
 DO NOT output anything except the JSON object.`;
 
@@ -378,7 +397,15 @@ export async function generateVideoWorkflow(
 
     callbacks.onStepChange("generating-visuals", `Creating visuals for scene ${i + 1}/${script.length}: ${s.title}...`);
 
-    const visualPrompt = `Create a motion graphics scene: ${s.visualDescription}. Title: "${s.title}". Duration: ${s.durationSeconds} seconds.`;
+    const visualPrompt = `Create a motion graphics scene with rich visual elements.
+Title: "${s.title}"
+Visual concept: ${s.visualDescription}
+Narration: "${s.narration}"
+Duration: ${s.durationSeconds}s at ${fps}fps = ${durationInFrames} frames.
+
+Include animated geometric shapes, backgrounds with gradients, and styled text elements.
+Spread animations across ALL ${durationInFrames} frames in multiple phases.
+Use spring() for entrances and interpolate() for smooth transitions.`;
 
     const result = await generateSceneStreaming(visualPrompt, callbacks.onCodeToken, {
       forceDurationFrames: durationInFrames,

@@ -1,161 +1,166 @@
 
 
-# Fix Chat Leaking to Code Panel, AI-Driven Workflow, and Polish
+# Replace TTS with Piper, Upgrade AI to Generate Rich Animations
 
-## Problems Found
+## Overview
 
-1. **Chat responses show in the code panel**: In `Index.tsx` line 104-107, `chatWithAI()` streams to `setStreamingCode()` which displays in both the code panel and editing panel. Chat text should only appear in the chat box.
-
-2. **Code not stored as files**: Currently each scene holds a single `componentCode` string. There's no file/folder structure. Users want to see organized code like a real project.
-
-3. **TTS is manual**: The voiceover section in `EditingPanel` asks the user to type a script and click "Generate Voice". It should be the AI that writes the script and generates audio automatically as part of its workflow.
-
-4. **FPS and duration sliders clutter the UI**: Users don't use these — they just prompt. The sliders in `EditingPanel` lines 76-86 should be removed.
-
-5. **AI has no structured workflow**: It rushes to generate visuals in one shot. It should follow: Script -> Audio -> Visuals, scene by scene.
+Two core changes: (1) swap Xenova TTS for Piper TTS (browser WASM-based, higher quality), and (2) upgrade the AI system prompt and workflow so it generates proper motion graphics with shapes, gradients, layered animations, and React components -- not just animated text.
 
 ---
 
-## Plan
+## 1. Replace TTS with Piper TTS
 
-### 1. Fix Chat Streaming Leak
+**File: `package.json`**
+- Add `@mintplex-labs/piper-tts-web` (v1.0.4)
+- Remove `@huggingface/transformers`
 
-**In `Index.tsx`**: Add a separate `streamingChat` state for chat responses. Use `setStreamingChat` (not `setStreamingCode`) when calling `chatWithAI()`. Pass `streamingChat` to `ChatPanel` for display.
-
-**In `ChatPanel.tsx`**: Show `streamingChat` as a live assistant message bubble (not in the code area). When streaming finishes, clear it and add the final message.
-
-This ensures chat text only appears in the chat panel, and code streaming only appears in the code/editing panel.
-
-### 2. Add Project File Tree
-
-**In `scene-types.ts`**: Add a `ProjectFile` type:
+**File: `src/lib/tts.ts`** -- Full rewrite:
 ```text
-ProjectFile {
-  path: string      // e.g. "scenes/scene-1.jsx"
-  content: string   // the code
-  sceneId: string   // links to a RemotionScene
+import * as tts from '@mintplex-labs/piper-tts-web';
+
+export async function generateVoiceover(
+  text: string,
+  onProgress?: (progress: number, text: string) => void
+): Promise<string> {
+  onProgress?.(10, "Loading Piper TTS model...");
+  const wav = await tts.predict({
+    text,
+    voiceId: 'en_US-hfc_female-medium',
+  });
+  onProgress?.(100, "Done");
+  return URL.createObjectURL(wav);
 }
 ```
 
-Add `files: ProjectFile[]` to `VideoProject`.
+This is a browser-only WASM library. It downloads the voice model on first use (~15MB), caches it, and generates WAV audio entirely client-side. Much faster and better quality than speecht5.
 
-**In `EditingPanel.tsx`**: Replace the raw code textarea with a simple file explorer:
-- Left column: file tree showing `scenes/scene-1.jsx`, `scenes/scene-2.jsx`, `audio/voiceover-1.wav`
-- Right column: code viewer for the selected file
-- Each generated scene auto-creates a file entry
-- Audio files appear when voiceover is generated
+---
 
-### 3. AI-Driven Voiceover (Not Manual)
+## 2. Upgrade AI System Prompt for Rich Motion Graphics
 
-**Remove** the manual voiceover text input and "Generate Voice" button from `EditingPanel`.
+**File: `src/lib/ai.ts`** -- Rewrite `GENERATE_SYSTEM_PROMPT`:
 
-**In `ai.ts`**: The AI already outputs a `voiceoverText` field. After scene generation, automatically:
-1. Extract `voiceoverText` from the AI output
-2. Call `generateVoiceover(voiceoverText)` from `tts.ts`
-3. Attach the audio URL to the scene
+The current prompt only teaches the AI to create text with opacity fades. The new prompt will include examples showing:
 
-**In `Index.tsx`**: After `generateSceneStreaming()` returns, check for `result.voiceoverText`. If present, set status to `"generating-voice"`, call TTS, then attach audio to the scene. Show progress in chat.
+- **Geometric shapes**: circles, rectangles, lines as visual elements using `div` with borderRadius, gradients
+- **Multi-layer compositions**: background layer, midground shapes, foreground text
+- **Advanced animations**: spring-based entrances, parallax movement, scaling, rotation via CSS transform
+- **Color and gradient backgrounds**: linear-gradient, radial-gradient
+- **Icon/logo placeholders**: styled divs acting as logos (circles with initials, abstract shapes)
+- **Scene transitions**: elements entering/exiting at different phases
 
-### 4. Remove FPS/Duration Sliders
-
-**In `EditingPanel.tsx`**: Remove the entire "Composition info" section (lines 70-87) with FPS slider and duration slider. Keep only:
-- Scene name and duplicate/delete buttons
-- File tree + code viewer
-- Read-only info line showing dimensions and duration
-
-### 5. AI Workflow: Script -> Audio -> Visuals
-
-**In `ai.ts`**: Add a new `generateVideoWorkflow()` function that orchestrates:
-
-**Step 1 — Script**: Ask the AI to write a video script with scene breakdowns:
+Example additions to the system prompt:
 ```text
-System: "Write a video script. Output JSON: { scenes: [{ title, narration, visualDescription, durationSeconds }] }"
+DESIGN PRINCIPLES:
+- Create RICH motion graphics, not just text on a background
+- Use geometric shapes (circles, rectangles, lines) as visual elements
+- Layer multiple elements with different animation timings
+- Use gradients, shadows, and color transitions
+- Create logo-like elements using styled divs (circles with letters, abstract shapes)
+- Animate position, scale, rotation, and opacity together
+- Use spring() for natural-feeling entrances
+
+EXAMPLE - Logo reveal with shapes:
+The code creates a circle that scales in with spring, then text fades in,
+then supporting shapes slide in from sides, then a tagline types in.
+Each element uses different interpolate ranges spread across the full duration.
 ```
-Stream this to chat so user sees the plan.
 
-**Step 2 — Audio**: For each scene's narration text, call `generateVoiceover()`. Show progress in chat.
+The prompt will include 2-3 rich examples showing multi-element compositions with shapes, not just text paragraphs.
 
-**Step 3 — Visuals**: For each scene, call `generateSceneStreaming()` with the visual description as prompt and the duration from the script. Stream code to the code panel.
+---
 
-**Step 4 — Assembly**: Add all scenes to the project in order. Each scene knows its position in the timeline.
+## 3. Teach AI to Generate Reusable Sub-Components
 
-**In `Index.tsx`**: When the user's prompt is a "generate" intent, call `generateVideoWorkflow()` instead of `generateSceneStreaming()` directly. The workflow function accepts callbacks for updating chat messages, streaming code, and progress.
+**File: `src/lib/ai.ts`** -- Update system prompt to show the AI it can define helper functions inside the code body:
 
-**In `ChatPanel.tsx`**: Show workflow steps as status messages:
-- "Writing script..." with the script preview
-- "Generating voiceover for scene 1..." 
-- "Creating visuals for scene 1..."
-- "Done! 3 scenes created."
+```text
+You can define helper functions before the return statement:
+  var makeCircle = function(x, y, size, color, delay) {
+    var scale = spring({ frame: frame - delay, fps: fps, config: { damping: 12 } });
+    return React.createElement("div", { style: { position: "absolute", left: x, top: y, width: size, height: size, borderRadius: "50%", background: color, transform: "scale(" + scale + ")" } });
+  };
+```
 
-### 6. Simplify Sidebar
+This lets the AI create reusable animated elements (particle systems, grid patterns, icon sets) rather than copy-pasting the same div 20 times.
 
-**In `SidebarNav.tsx`**: Remove "Media" tab (composition info moves into a collapsible section of the editing panel). Keep: New, Projects, Chat, Code.
+---
+
+## 4. Update Workflow Visual Generation Step
+
+**File: `src/lib/ai.ts`** -- In `generateVideoWorkflow()`, improve the visual prompt sent per scene:
+
+Currently it sends: `"Create a motion graphics scene: {visualDescription}"`
+
+Change to include more context:
+```text
+"Create a motion graphics scene with rich visual elements.
+Title: {title}
+Visual concept: {visualDescription}
+Narration: {narration}
+Duration: {durationSeconds}s at {fps}fps = {durationInFrames} frames.
+
+Include animated shapes, backgrounds with gradients, and text elements.
+Spread animations across ALL {durationInFrames} frames in multiple phases."
+```
+
+This gives the AI enough context to design visuals that match the narration timing.
+
+---
+
+## 5. Audio Sync in Video Preview
+
+**File: `src/components/VideoPreview.tsx`** -- Add an `<audio>` element that syncs with the Remotion Player when a scene has voiceover:
+
+- Create an audio ref pointing to `scene.voiceover?.audioUrl`
+- On player `play` event: `audioEl.play()`
+- On player `pause` event: `audioEl.pause()`
+- On `frameupdate`: sync `audioEl.currentTime = frame / fps` if drift > 0.1s
+- On scene change: reset audio element src
 
 ---
 
 ## Technical Details
 
-### New streaming states (Index.tsx)
-```text
-const [streamingChat, setStreamingChat] = useState("");  // for chat replies
-const [streamingCode, setStreamingCode] = useState("");  // for code generation only
-const [workflowStep, setWorkflowStep] = useState("");    // "script" | "audio" | "visuals" | ""
-```
-
-### Workflow function signature (ai.ts)
-```text
-interface WorkflowCallbacks {
-  onScriptToken: (text: string) => void;
-  onCodeToken: (code: string) => void;
-  onStepChange: (step: string, detail: string) => void;
-  onSceneReady: (scene: RemotionScene) => void;
-  fps: number;
-}
-
-async function generateVideoWorkflow(
-  prompt: string,
-  callbacks: WorkflowCallbacks
-): Promise<RemotionScene[]>
-```
-
-### Script generation prompt (ai.ts)
-```text
-"You are a video scriptwriter. Given a topic, write a structured script.
-Output ONLY a JSON array:
-[{ "title": "...", "narration": "...", "visualDescription": "...", "durationSeconds": N }]
-Each scene should be 3-10 seconds. Total should match user's requested duration.
-DO NOT output anything except the JSON array."
-```
-
-### ProjectFile type (scene-types.ts)
-```text
-interface ProjectFile {
-  id: string;
-  path: string;        // "scenes/intro.jsx"
-  content: string;     // component code
-  sceneId?: string;    // links to RemotionScene
-  type: "scene" | "audio" | "config";
-}
-```
-
-### File tree in EditingPanel
-```text
-scenes/
-  scene-1-intro.jsx        <- click to view code
-  scene-2-features.jsx
-audio/
-  voiceover-1.wav          <- shows audio player
-  voiceover-2.wav
-```
-
 ### Files to Modify
+
 | File | Change |
 |------|--------|
-| `src/lib/scene-types.ts` | Add `ProjectFile`, add `files` to `VideoProject` |
-| `src/lib/ai.ts` | Add `generateVideoWorkflow()`, add script generation prompt |
-| `src/pages/Index.tsx` | Separate `streamingChat` from `streamingCode`, workflow integration, auto-TTS |
-| `src/components/ChatPanel.tsx` | Show `streamingChat` as live bubble, show workflow steps |
-| `src/components/EditingPanel.tsx` | Remove sliders, add file tree, remove manual voiceover input |
-| `src/components/SidebarNav.tsx` | Remove "Media" tab |
-| `src/components/TimelinePanel.tsx` | Minor: auto-update when workflow adds scenes |
+| `package.json` | Add `@mintplex-labs/piper-tts-web`, remove `@huggingface/transformers` |
+| `src/lib/tts.ts` | Full rewrite to use Piper TTS predict API |
+| `src/lib/ai.ts` | Rewrite GENERATE_SYSTEM_PROMPT with rich motion graphics examples; improve visual prompt in workflow |
+| `src/components/VideoPreview.tsx` | Add audio element synced to player for voiceover playback |
+
+### Piper TTS API
+```text
+import * as tts from '@mintplex-labs/piper-tts-web';
+// Returns a Blob (WAV)
+const wav = await tts.predict({ text: "Hello world", voiceId: "en_US-hfc_female-medium" });
+const url = URL.createObjectURL(wav);
+```
+
+### Audio sync pattern (VideoPreview.tsx)
+```text
+const audioRef = useRef<HTMLAudioElement>(null);
+
+// On frameupdate:
+if (audioRef.current && scene.voiceover?.audioUrl) {
+  const targetTime = frame / scene.fps;
+  if (Math.abs(audioRef.current.currentTime - targetTime) > 0.15) {
+    audioRef.current.currentTime = targetTime;
+  }
+}
+
+// On play: audioRef.current?.play()
+// On pause: audioRef.current?.pause()
+```
+
+### Enhanced system prompt structure
+The new GENERATE_SYSTEM_PROMPT will be ~60 lines covering:
+1. JSON output format (same as current)
+2. Available APIs (same)
+3. Design principles (NEW - shapes, layers, gradients)
+4. Helper function pattern (NEW)
+5. Two rich examples (NEW - logo reveal, info scene with shapes)
+6. Duration enforcement (same)
 
